@@ -164,17 +164,22 @@ class AgentLoop:
             if response.tool_calls:
                 logger.info(f"Model requested {len(response.tool_calls)} tool calls")
                 
-                # Phase 0.5: Check tool budget
+                # Phase 0.5: Check tool budget BEFORE executing batch
                 if not state.execution.can_use_tool():
-                    logger.warning(f"Tool budget exceeded for step {step_num}")
+                    logger.warning(f"Tool budget exhausted before batch, step {step_num}")
+                    # Add THINK step to prevent soft loop (forces step boundary)
+                    state.execution.add_step(Step(
+                        step_type=StepType.THINK,
+                        content="Budget exhausted; summarizing progress and replanning.",
+                    ))
                     state.conversation.add_message(Message(
-                        role=MessageRole.ASSISTANT,
-                        content="I've reached the tool budget limit for this step. Let me summarize what I've learned so far and continue.",
+                        role=MessageRole.SYSTEM,
+                        content="⚠️ Tool budget exhausted. Summarize what you've learned and replan your next step.",
                     ))
                     continue
                 
-                # Execute tools
-                tool_results = await self._execute_tools(state, response.tool_calls)
+                # Execute tools (with per-tool budget enforcement)
+                tool_results, budget_hit = await self._execute_tools(state, response.tool_calls)
                 
                 # Add tool results to conversation
                 for result in tool_results:
@@ -182,6 +187,14 @@ class AgentLoop:
                         role=MessageRole.TOOL,
                         content=result.output if result.success else f"Error: {result.error}",
                         tool_call_id=result.tool_call_id,
+                    ))
+                
+                # If budget was hit mid-batch, inject guidance
+                if budget_hit:
+                    skipped = len(response.tool_calls) - len(tool_results)
+                    state.conversation.add_message(Message(
+                        role=MessageRole.SYSTEM,
+                        content=f"⚠️ Tool budget hit mid-batch. {skipped} tool(s) skipped. Replan next step with remaining work.",
                     ))
                 
                 # Phase 0.5: Check workflow discipline with judge
@@ -214,28 +227,36 @@ class AgentLoop:
         self,
         state: AgentState,
         tool_calls: List[ToolCall],
-    ) -> List[ToolResult]:
-        """Execute a list of tool calls.
+    ) -> tuple[List[ToolResult], bool]:
+        """Execute a list of tool calls with per-tool budget enforcement.
         
         For each tool call:
-        1. Validate with rule engine
-        2. Look up tool in registry
-        3. Execute tool
-        4. Capture result
+        1. Check budget (hard stop if exhausted)
+        2. Validate with rule engine
+        3. Look up tool in registry
+        4. Execute tool
+        5. Capture result
         
         Args:
             state: Current agent state
             tool_calls: List of tool calls from model
             
         Returns:
-            List of tool results
+            Tuple of (list of tool results, whether budget was hit mid-batch)
         """
         results = []
+        budget_hit = False
         
         for tool_call in tool_calls:
+            # Phase 0.5: Check budget BEFORE each tool (hard stop mid-batch)
+            if not state.execution.can_use_tool():
+                logger.warning(f"Budget exhausted mid-batch, skipping {tool_call.name} and remaining tools")
+                budget_hit = True
+                break  # Stop executing remaining tools
+            
             logger.info(f"Executing tool: {tool_call.name}")
             
-            # Phase 0.5: Record tool use for budget tracking
+            # Phase 0.5: Record tool use AFTER confirming budget allows it
             state.execution.record_tool_use()
             
             # Validate with rule engine
@@ -293,4 +314,4 @@ class AgentLoop:
                     success=False,
                 ))
         
-        return results
+        return results, budget_hit

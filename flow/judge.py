@@ -205,7 +205,13 @@ class AgentJudge:
         
         # Check: Did agent write code without running tests?
         write_tools = ["write_file", "edit_file", "create_file"]
-        test_tools = ["shell"]  # Assumes tests run via shell
+        
+        # Test command keywords to detect in shell arguments
+        test_cmd_keywords = [
+            "pytest", "python -m pytest", "python -m unittest", 
+            "unittest", "npm test", "pnpm test", "yarn test",
+            "go test", "cargo test", "mvn test", "gradle test",
+        ]
         
         has_write = False
         has_test_after_write = False
@@ -217,14 +223,24 @@ class AgentJudge:
                     if tc.name in write_tools:
                         has_write = True
                         write_step_idx = i
+                    
+                    # Phase 0.5 fix: Detect tests via shell command ARGUMENTS, not output
+                    # This is reliable even when pytest -q outputs minimal text
+                    if tc.name == "shell" and has_write and i > write_step_idx:
+                        # Check if command argument contains test keywords
+                        cmd_arg = str(tc.arguments.get("command", "") or 
+                                      tc.arguments.get("cmd", "") or 
+                                      tc.arguments.get("args", "")).lower()
+                        if any(keyword in cmd_arg for keyword in test_cmd_keywords):
+                            has_test_after_write = True
             
-            # Check tool results in OBSERVE steps
+            # Fallback: Also check tool results text in OBSERVE steps (for backwards compat)
             if step.step_type == StepType.OBSERVE and has_write and i > write_step_idx:
                 if step.tool_results:
                     for result in step.tool_results:
                         result_text = ((result.output or "") + (result.error or "")).lower()
                         if any(keyword in result_text 
-                               for keyword in ["test", "pytest", "unittest"]):
+                               for keyword in ["pytest", "unittest", "test passed", "tests passed"]):
                             has_test_after_write = True
         
         if has_write and not has_test_after_write:
@@ -236,11 +252,25 @@ class AgentJudge:
             )
         
         # Check: Repeated shell calls with errors?
+        # Phase 0.5 fix: Only count shell tool errors, not all tool errors
+        # Track shell tool call IDs from CALL_TOOL steps, then match to OBSERVE results
         recent_shell_errors = []
-        for step in steps[-5:]:  # Last 5 steps
+        last_tool_was_shell = False
+        
+        for step in steps[-10:]:  # Last 10 steps to cover CALL_TOOL + OBSERVE pairs
+            # Track if this step's tool calls include shell
+            if step.tool_calls:
+                for tc in step.tool_calls:
+                    if tc.name == "shell":
+                        last_tool_was_shell = True
+                        break
+                else:
+                    last_tool_was_shell = False
+            
+            # If this is an OBSERVE step and last tool was shell, count errors
             if step.step_type == StepType.OBSERVE and step.tool_results:
                 for result in step.tool_results:
-                    if not result.success and result.error:
+                    if not result.success and result.error and last_tool_was_shell:
                         recent_shell_errors.append(result.error)
         
         if len(recent_shell_errors) >= 2:

@@ -165,7 +165,86 @@ class TestJudgePhase05(unittest.TestCase):
         judgment = self.judge.check_tool_loop(steps)
         self.assertFalse(judgment.passed)
         self.assertIn("same_tool", judgment.reason)
+    
+    def test_workflow_discipline_detects_test_via_shell_args(self):
+        """Test that test detection works via shell command args, not just output (Phase 0.5 fix)."""
+        steps = [
+            Step(
+                step_type=StepType.CALL_TOOL,
+                content="Writing code",
+                tool_calls=[
+                    ToolCall(id="1", name="write_file", arguments={"path": "test.py", "content": "def foo(): pass"})
+                ],
+            ),
+            Step(
+                step_type=StepType.OBSERVE,
+                content="File written",
+                tool_results=[
+                    ToolResult(tool_call_id="1", output="File written successfully", success=True)
+                ],
+            ),
+            Step(
+                step_type=StepType.CALL_TOOL,
+                content="Running tests with quiet output",
+                tool_calls=[
+                    # Using pytest -q which may output minimal text
+                    ToolCall(id="2", name="shell", arguments={"cmd": "pytest -q tests/"})
+                ],
+            ),
+            Step(
+                step_type=StepType.OBSERVE,
+                content="Quiet output",
+                tool_results=[
+                    # Output doesn't contain "pytest" or "test" keywords
+                    ToolResult(tool_call_id="2", output="..\n2 passed", success=True)
+                ],
+            ),
+        ]
+        
+        judgment = self.judge.check_workflow_discipline(steps)
+        # Should pass because we detect pytest in the command args, not output
+        self.assertTrue(judgment.passed)
+    
+    def test_workflow_discipline_non_shell_errors_ignored(self):
+        """Test that non-shell tool errors don't trigger shell warning (Phase 0.5 fix)."""
+        steps = [
+            Step(
+                step_type=StepType.CALL_TOOL,
+                content="Reading file",
+                tool_calls=[
+                    ToolCall(id="1", name="read_file", arguments={"path": "missing.txt"})
+                ],
+            ),
+            Step(
+                step_type=StepType.OBSERVE,
+                content="Error",
+                tool_results=[
+                    ToolResult(tool_call_id="1", output="", error="File not found: missing.txt", success=False)
+                ],
+            ),
+            Step(
+                step_type=StepType.CALL_TOOL,
+                content="Reading another file",
+                tool_calls=[
+                    ToolCall(id="2", name="read_file", arguments={"path": "also_missing.txt"})
+                ],
+            ),
+            Step(
+                step_type=StepType.OBSERVE,
+                content="Error again",
+                tool_results=[
+                    ToolResult(tool_call_id="2", output="", error="File not found: also_missing.txt", success=False)
+                ],
+            ),
+        ]
+        
+        judgment = self.judge.check_workflow_discipline(steps)
+        # Should pass (or not trigger shell warning) because these are read_file, not shell
+        # The reason should NOT mention "shell repeatedly"
+        if not judgment.passed:
+            self.assertNotIn("shell", judgment.reason.lower())
 
 
 if __name__ == "__main__":
     unittest.main()
+
