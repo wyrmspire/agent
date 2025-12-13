@@ -31,13 +31,59 @@ docts/  → Documentation
 
 See [docts/archi.md](docts/archi.md) for detailed architecture.
 
+## How It Works
+
+### Agent Loop
+- **Entry**: Python CLI (`python cli.py`) or programmatic via `flow/loops.py`
+- **Loop**: `User Input → Model Call → Tool Detection → Tool Execution → Response`
+- **Max Steps**: Configurable limit (default: 20) prevents infinite loops
+- **Async**: Built on Python asyncio for concurrent tool execution
+
+### Tool System
+- **Location**: All tools live in `tool/` directory
+- **Interface**: Tools implement `BaseTool` with `name`, `description`, `parameters`, and `execute()`
+- **Schema**: OpenAI function calling format (JSON Schema with `type: "object"`)
+- **Registry**: `tool/index.py` manages tool discovery and lookup
+- **Dynamic**: Agent can create and promote Python functions to tools at runtime (Phase 0.4)
+
+### Model Gateway
+- **Abstraction**: `gate/bases.py` defines `ModelGateway` interface
+- **Implementations**:
+  - `gate/lmstd.py` - OpenAI-compatible API adapter (LM Studio, Ollama, vLLM, etc.)
+  - `gate/mock.py` - Mock gateway for testing
+  - `servr/api.py` - Native model server (loads Transformers models directly)
+- **Protocol**: OpenAI `/v1/chat/completions` format with tool calling
+
+### HTTP Layer
+- **Model Server**: FastAPI server (`servr/api.py`) on port 8000
+- **Client**: `httpx` async client for model API calls
+- **Tool Parsing**: Server parses `<tool>` XML tags OR Python-style function calls from model output
+
+### State & Memory
+| Layer | Implementation | Persistence |
+|-------|---------------|-------------|
+| Conversation | `core/state.py` (in-memory) | Session only |
+| Short-term | `store/short.py` (in-memory) | Session only |
+| Long-term | `store/longg.py` (SQLite) | Disk |
+| Vector search | `store/vects.py` (pickle) | Disk |
+| Project state | `flow/planner.py` (JSON) | `workspace/project.json` |
+| Skills | `workspace/skills/*.py` | Disk (Python files) |
+
+### Local-Only Design
+- ✅ **100% local** - No cloud dependencies, no API keys required
+- ✅ **Offline capable** - Works with local models (Qwen, CodeLlama, etc.)
+- ✅ **Privacy** - All data stays on your machine
+- ✅ **Workspace isolation** - Agent sandboxed to `workspace/` directory
+- ⚡ **Optional**: Can connect to external OpenAI-compatible APIs if desired
+
 ## Quick Start
 
 ### Prerequisites
 
 1. **OpenAI-compatible API** endpoint
-   - LM Studio, Ollama, vLLM, or any OpenAI-compatible server
-   - Default: http://localhost:1234/v1
+   - **Native server**: Run `bash runsv.sh` to start the built-in model server on port 8000
+   - **External**: LM Studio, Ollama, vLLM, or any OpenAI-compatible server
+   - Default: http://localhost:8000/v1
    - Compatible models: Qwen 2.5 Coder, CodeLlama, DeepSeek Coder, etc.
 
 2. **Python 3.10+**
@@ -68,12 +114,12 @@ Type `quit` or `exit` to stop.
 
 ## Configuration
 
-Create a `.env` file (optional):
+Create a `.env` file (or copy from `.env.example`):
 
 ```bash
 # Model configuration
 AGENT_MODEL=qwen2.5-coder-7b
-AGENT_MODEL_URL=http://localhost:1234/v1
+AGENT_MODEL_URL=http://localhost:8000/v1
 
 # Agent configuration
 AGENT_MAX_STEPS=20
@@ -83,6 +129,8 @@ AGENT_TEMPERATURE=0.7
 AGENT_ENABLE_SHELL=true
 AGENT_ENABLE_FILES=true
 AGENT_ENABLE_FETCH=true
+AGENT_ENABLE_DATA_VIEW=true
+AGENT_ENABLE_PYEXE=true
 
 # Logging
 AGENT_LOG_LEVEL=INFO
@@ -224,50 +272,64 @@ Add custom rules in [boot/wires.py](boot/wires.py).
 
 ```
 agent/
-├── boot/          # Entry point and wiring
-│   ├── mains.py   # Main entry point
-│   ├── setup.py   # Configuration loading
-│   └── wires.py   # Dependency injection
-├── core/          # Core contracts (no dependencies)
-│   ├── types.py   # Message, Tool, Step types
-│   ├── proto.py   # Request/response schemas
-│   ├── state.py   # Agent state objects
-│   └── rules.py   # Safety and auth rules
-├── gate/          # Model gateway
-│   ├── bases.py   # Abstract interface
-│   ├── lmstd.py   # LM Studio adapter
-│   └── embed.py   # Embedding gateway
-├── tool/          # Real tools
-│   ├── bases.py   # Tool interface
-│   ├── files.py   # File tools
-│   ├── shell.py   # Shell tool
-│   ├── fetch.py   # HTTP tool
-│   └── index.py   # Tool registry
-├── flow/          # Agent logic
-│   ├── loops.py   # Main agent loop
-│   ├── plans.py   # Planning prompts
-│   ├── execs.py   # Tool execution
-│   └── judge.py   # Verifier
-├── store/         # Memory
-│   ├── bases.py   # Store interfaces
-│   ├── short.py   # Short-term memory
-│   ├── longg.py   # Long-term memory
-│   └── vects.py   # Vector store
-├── servr/         # API server
-│   ├── servr.py   # Server setup
-│   └── routs.py   # Route handlers
-├── model/         # Model configs
-│   ├── qwen5/     # Qwen configs
-│   └── embed/     # Embedding configs
-├── tests/         # Tests
-│   ├── tools/     # Tool tests
-│   ├── flows/     # Flow tests
-│   └── gates/     # Gateway tests
-├── docts/         # Documentation
-│   ├── archi.md   # Architecture
-│   ├── tools.md   # Tools guide
-│   └── flows.md   # Flows guide
-├── cli.py         # CLI demo
+├── boot/           # Entry point and wiring
+│   ├── mains.py    # Main entry point
+│   ├── setup.py    # Configuration loading
+│   └── wires.py    # Dependency injection
+├── core/           # Core contracts (no dependencies)
+│   ├── types.py    # Message, Tool, Step types
+│   ├── proto.py    # Request/response schemas
+│   ├── state.py    # Agent state objects
+│   ├── rules.py    # Safety and auth rules
+│   ├── sandb.py    # Workspace sandbox isolation
+│   └── skills.py   # Skill compiler (Phase 0.4)
+├── gate/           # Model gateway
+│   ├── bases.py    # Abstract interface
+│   ├── lmstd.py    # LM Studio / OpenAI adapter
+│   ├── mock.py     # Mock gateway for testing
+│   └── embed.py    # Embedding gateway
+├── tool/           # Real tools
+│   ├── bases.py    # Tool interface
+│   ├── files.py    # File tools (list, read, write)
+│   ├── shell.py    # Shell tool
+│   ├── fetch.py    # HTTP tool
+│   ├── dview.py    # Data view tool (Phase 0.2)
+│   ├── pyexe.py    # Python executor (Phase 0.2)
+│   ├── memory.py   # Memory tool (Phase 0.3)
+│   ├── dynamic.py  # Dynamic tool wrapper (Phase 0.4)
+│   ├── manager.py  # Skill promotion tool (Phase 0.4)
+│   └── index.py    # Tool registry
+├── flow/           # Agent logic
+│   ├── loops.py    # Main agent loop
+│   ├── plans.py    # Planning prompts
+│   ├── planner.py  # Project state machine (Phase 0.3)
+│   ├── execs.py    # Tool execution
+│   └── judge.py    # Verifier
+├── store/          # Memory
+│   ├── bases.py    # Store interfaces
+│   ├── short.py    # Short-term memory
+│   ├── longg.py    # Long-term memory
+│   └── vects.py    # Vector store (persistent)
+├── servr/          # API server
+│   ├── api.py      # FastAPI model server
+│   └── routs.py    # Route handlers
+├── model/          # Model configs
+│   ├── qwen5/      # Qwen configs
+│   └── embed/      # Embedding configs
+├── tests/          # Tests
+│   ├── tools/      # Tool tests
+│   ├── flows/      # Flow tests
+│   ├── gates/      # Gateway tests
+│   ├── core/       # Core tests (skills)
+│   └── store/      # Store tests
+├── docts/          # Documentation
+│   ├── archi.md    # Architecture
+│   ├── tools.md    # Tools guide
+│   └── flows.md    # Flows guide
+├── workspace/      # Agent workspace (sandboxed)
+│   └── skills/     # Promoted skill functions
+├── cli.py          # CLI demo
+├── runsv.sh        # Start native model server
 └── requirements.txt
 ```
 

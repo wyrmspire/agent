@@ -6,7 +6,7 @@ IGNORE_DIRS=("node_modules" ".next" ".git" "__pycache__" "venv" ".venv" "env" "d
 IGNORE_FILES=("package-lock.json" "yarn.lock" "custom_instructions.md" "printcode.sh" "project_structure.txt")
 OUTPUT_PREFIX="dump"
 OUTPUT_EXT=".md"
-NUM_FILES=5
+NUM_FILES=9
 
 # Helper to construct find command ignore arguments
 construct_find_args() {
