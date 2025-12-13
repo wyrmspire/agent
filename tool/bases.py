@@ -17,6 +17,8 @@ Rules:
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
+import jsonschema
+from jsonschema import validate, ValidationError
 
 from core.types import Tool, ToolCall, ToolResult
 
@@ -77,6 +79,9 @@ class BaseTool(ABC):
     async def call(self, tool_call: ToolCall) -> ToolResult:
         """Call the tool with a ToolCall object.
         
+        This method validates arguments against the tool's schema before execution.
+        This catches hallucinations and type errors early with clear error messages.
+        
         Args:
             tool_call: Tool call from the model
             
@@ -84,6 +89,19 @@ class BaseTool(ABC):
             ToolResult with output or error
         """
         try:
+            # Validate arguments against schema before execution
+            try:
+                validate(instance=tool_call.arguments, schema=self.parameters)
+            except ValidationError as ve:
+                # Return clean validation error instead of letting tool crash
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    output="",
+                    error=f"Invalid arguments: {ve.message}",
+                    success=False,
+                )
+            
+            # Execute tool with validated arguments
             result = await self.execute(tool_call.arguments)
             result.tool_call_id = tool_call.id
             return result

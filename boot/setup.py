@@ -75,6 +75,7 @@ def load_config() -> Dict[str, Any]:
         "model": os.getenv("AGENT_MODEL", "qwen2.5-coder"),
         "model_url": os.getenv("AGENT_MODEL_URL", "http://localhost:1234/v1"),
         "model_api_key": os.getenv("AGENT_MODEL_API_KEY", ""),
+        "model_path": os.getenv("AGENT_MODEL_PATH", ""),
         
         # Agent config
         "max_steps": int(os.getenv("AGENT_MAX_STEPS", "20")),

@@ -9,17 +9,20 @@ Responsibilities:
 - Block access to sensitive directories (.env, servr/, boot/)
 - Provide safe path operations
 - Ensure data stays in ./workspace/
+- Monitor resource usage (disk space, RAM)
 
 Rules:
 - All paths must be within ./workspace
 - No access to source code directories
 - No access to configuration files
 - Paths are normalized and validated
+- Enforce resource limits to prevent system crashes
 
 This is the "jail" that keeps generated data separate from source code.
 """
 
 import os
+import psutil
 from pathlib import Path
 from typing import Union, Optional
 
@@ -29,11 +32,17 @@ class WorkspaceError(Exception):
     pass
 
 
+class ResourceLimitError(WorkspaceError):
+    """Exception raised when resource limits are exceeded."""
+    pass
+
+
 class Workspace:
     """Workspace path manager that enforces directory isolation.
     
     This class ensures all file operations occur within a designated
     workspace directory, preventing access to source code and config files.
+    It also monitors resource usage to prevent system crashes.
     
     Example:
         ws = Workspace("/home/user/agent/workspace")
@@ -41,13 +50,22 @@ class Workspace:
         ws.resolve("../servr/api.py")  # Raises WorkspaceError
     """
     
-    def __init__(self, workspace_root: Union[str, Path]):
-        """Initialize workspace with root directory.
+    def __init__(
+        self,
+        workspace_root: Union[str, Path],
+        max_workspace_size_gb: float = 5.0,
+        min_free_ram_percent: float = 10.0,
+    ):
+        """Initialize workspace with root directory and resource limits.
         
         Args:
             workspace_root: Root directory for workspace operations
+            max_workspace_size_gb: Maximum workspace size in GB (default: 5GB)
+            min_free_ram_percent: Minimum free RAM percentage (default: 10%)
         """
         self.root = Path(workspace_root).resolve()
+        self.max_workspace_size_bytes = int(max_workspace_size_gb * 1024 * 1024 * 1024)
+        self.min_free_ram_percent = min_free_ram_percent
         
         # Create workspace if it doesn't exist
         self.root.mkdir(parents=True, exist_ok=True)
@@ -220,6 +238,83 @@ class Workspace:
         resolved = self.resolve(path)
         resolved.mkdir(parents=True, exist_ok=True)
         return resolved
+    
+    def get_workspace_size(self) -> int:
+        """Get total size of workspace in bytes.
+        
+        Returns:
+            Total size in bytes
+        """
+        total_size = 0
+        for item in self.root.rglob('*'):
+            if item.is_file():
+                try:
+                    total_size += item.stat().st_size
+                except (OSError, PermissionError):
+                    # Skip files we can't access
+                    pass
+        return total_size
+    
+    def check_workspace_size(self) -> None:
+        """Check if workspace size is within limits.
+        
+        Raises:
+            ResourceLimitError: If workspace exceeds size limit
+        """
+        current_size = self.get_workspace_size()
+        if current_size > self.max_workspace_size_bytes:
+            size_gb = current_size / (1024 * 1024 * 1024)
+            limit_gb = self.max_workspace_size_bytes / (1024 * 1024 * 1024)
+            raise ResourceLimitError(
+                f"Workspace size ({size_gb:.2f}GB) exceeds limit ({limit_gb:.2f}GB). "
+                f"Clean up files before continuing."
+            )
+    
+    def check_ram_usage(self) -> None:
+        """Check if system has sufficient free RAM.
+        
+        Raises:
+            ResourceLimitError: If free RAM is below minimum threshold
+        """
+        memory = psutil.virtual_memory()
+        free_percent = 100.0 - memory.percent
+        
+        if free_percent < self.min_free_ram_percent:
+            raise ResourceLimitError(
+                f"Low system memory: only {free_percent:.1f}% free "
+                f"(minimum: {self.min_free_ram_percent}%). "
+                f"Close other applications or increase memory."
+            )
+    
+    def check_resources(self) -> None:
+        """Check all resource limits before operations.
+        
+        This is a circuit breaker that prevents system crashes.
+        Call this before expensive operations like file writes or code execution.
+        
+        Raises:
+            ResourceLimitError: If any resource limit is exceeded
+        """
+        self.check_workspace_size()
+        self.check_ram_usage()
+    
+    def get_resource_stats(self) -> dict:
+        """Get current resource usage statistics.
+        
+        Returns:
+            Dictionary with resource stats
+        """
+        workspace_size = self.get_workspace_size()
+        memory = psutil.virtual_memory()
+        
+        return {
+            "workspace_size_bytes": workspace_size,
+            "workspace_size_gb": workspace_size / (1024 * 1024 * 1024),
+            "workspace_limit_gb": self.max_workspace_size_bytes / (1024 * 1024 * 1024),
+            "ram_used_percent": memory.percent,
+            "ram_free_percent": 100.0 - memory.percent,
+            "ram_available_gb": memory.available / (1024 * 1024 * 1024),
+        }
 
 
 def get_default_workspace() -> Workspace:

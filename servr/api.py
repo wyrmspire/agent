@@ -16,11 +16,19 @@ import bitsandbytes # Trigger potential DLL load fix
 import time
 import logging
 import json
+import re
+import xml.etree.ElementTree as ET
 from typing import List, Optional, Dict, Any, Union
 import torch
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+
+# Import configuration loader
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from boot.setup import load_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -83,13 +91,19 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 class ModelEngine:
     """Real Python model engine using Transformers."""
     
-    def __init__(self):
-        # Use the absolute path provided by the user to ensure we hit the cached snapshot
-        self.model_path = r"C:\Users\wyrms\.cache\huggingface\hub\models--Qwen--Qwen2.5-Coder-7B-Instruct\snapshots\c03e6d358207e414f1eca0bb1891e29f1db0e242"
-        self.model_name = "qwen2.5-coder-7b-instruct"
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize model engine with configuration.
+        
+        Args:
+            config: Configuration dictionary from boot.setup
+        """
+        # Load model path from config (fallback to environment or default)
+        self.model_path = config.get("model_path") or r"C:\Users\wyrms\.cache\huggingface\hub\models--Qwen--Qwen2.5-Coder-7B-Instruct\snapshots\c03e6d358207e414f1eca0bb1891e29f1db0e242"
+        self.model_name = config.get("model", "qwen2.5-coder-7b-instruct")
         self.ready = False
         self.model = None
         self.tokenizer = None
+        logger.info(f"Initializing model engine with path: {self.model_path}")
         
     def load(self):
         """Load the model (real loading)."""
@@ -151,103 +165,124 @@ class ModelEngine:
         response_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
         
         # ---------------------------------------------------------------------
-        # Heuristic Tool Parser (Adapter for Text -> Structured)
+        # Tag-Based Tool Parser (Robust for Multi-line Code)
         # ---------------------------------------------------------------------
-        # Qwen-Coder tends to write shell commands or function calls in text.
-        # We catch them here and convert to OpenAI Tool Calls.
+        # Use XML-style tags to extract tool calls reliably.
+        # This handles multi-line Python code, nested quotes, etc.
+        # Format: <tool name="tool_name">{"arg": "value"}</tool>
         
-        import re
-        import time
-        import shlex
+        tool_calls = self._parse_tool_calls(response_text)
         
+        # If tools detected, return structured response
+        if tool_calls:
+            return {
+                "content": response_text,  # Keep reasoning
+                "tool_calls": tool_calls
+            }
+        
+        return response_text
+    
+    def _parse_tool_calls(self, text: str) -> List[Dict[str, Any]]:
+        """Parse tool calls from text using tag-based format.
+        
+        Expected format:
+            <tool name="tool_name">{"arg1": "value1", "arg2": "value2"}</tool>
+        
+        This is much more robust than regex for handling:
+        - Multi-line code blocks
+        - Nested quotes
+        - Special characters
+        
+        Args:
+            text: Response text from model
+            
+        Returns:
+            List of tool call dictionaries
+        """
         tool_calls = []
         
-        # Regex for common patterns
-        # 1. list_files <path>
-        # 2. write_file <path> <content> (content might be quoted)
-        # 3. fetch <url>
-        # 4. shell <cmd> (or just raw shell commands if in code block)
+        # Pattern to match tool tags with name attribute
+        # We use re.DOTALL to match across newlines
+        pattern = r'<tool\s+name="([^"]+)">(.*?)</tool>'
+        matches = re.finditer(pattern, text, re.DOTALL)
+        
+        for match in matches:
+            tool_name = match.group(1)
+            tool_args_str = match.group(2).strip()
+            
+            try:
+                # Parse JSON arguments
+                tool_args = json.loads(tool_args_str)
+                
+                # Create tool call
+                tool_calls.append({
+                    "id": f"call_{tool_name}_{int(time.time() * 1000)}",
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(tool_args)
+                    }
+                })
+                logger.info(f"Parsed tool call: {tool_name}")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
+                logger.debug(f"Arguments string: {tool_args_str}")
+        
+        # Fallback: Try legacy regex patterns for backward compatibility
+        # This ensures existing prompts still work during transition
+        if not tool_calls:
+            tool_calls = self._parse_legacy_format(text)
+        
+        return tool_calls
+    
+    def _parse_legacy_format(self, text: str) -> List[Dict[str, Any]]:
+        """Legacy parser for backward compatibility.
+        
+        Supports simple patterns like:
+        - list_files <path>
+        - fetch <url>
+        
+        Args:
+            text: Response text
+            
+        Returns:
+            List of tool calls
+        """
+        import shlex
+        tool_calls = []
         
         # Check for list_files
-        ls_match = re.search(r"list_files\s+([^\s\n]+)", response_text)
+        ls_match = re.search(r"list_files\s+([^\s\n]+)", text)
         if ls_match:
             tool_calls.append({
                 "id": f"call_ls_{int(time.time())}",
                 "type": "function",
                 "function": {
                     "name": "list_files",
-                    "arguments": f'{{"path": "{ls_match.group(1)}"}}'
+                    "arguments": json.dumps({"path": ls_match.group(1)})
                 }
             })
-            
+        
         # Check for fetch
-        fetch_match = re.search(r"fetch\s+(https?://[^\s\n]+)", response_text)
+        fetch_match = re.search(r"fetch\s+(https?://[^\s\n]+)", text)
         if fetch_match:
             tool_calls.append({
                 "id": f"call_fetch_{int(time.time())}",
                 "type": "function",
                 "function": {
                     "name": "fetch",
-                    "arguments": f'{{"url": "{fetch_match.group(1)}"}}'
+                    "arguments": json.dumps({"url": fetch_match.group(1)})
                 }
             })
-            
-        # Check for start_script (custom tool if needed) or just shell
         
-        # Check for shell
-        # Matches: shell "command"
-        if "shell" in response_text:
-            try:
-                for line in response_text.splitlines():
-                    if line.strip().startswith("shell"):
-                        parts = shlex.split(line.strip())
-                        if len(parts) >= 2:
-                            cmd = parts[1]
-                            tool_calls.append({
-                                "id": f"call_shell_{int(time.time())}",
-                                "type": "function",
-                                "function": {
-                                    "name": "shell",
-                                    "arguments": json.dumps({"cmd": cmd})
-                                }
-                            })
-            except Exception as e:
-                logger.warning(f"Failed to parse shell: {e}")
+        return tool_calls
 
-        # Check for write_file (naive quote parsing)
-        # Matches: write_file path "content" OR write_file path 'content'
-        if "write_file" in response_text:
-            try:
-                # Use shlex to handle quotes correctly
-                # Find the line with write_file
-                for line in response_text.splitlines():
-                    if line.strip().startswith("write_file"):
-                        parts = shlex.split(line.strip())
-                        if len(parts) >= 3:
-                            path = parts[1]
-                            content = parts[2]
-                            tool_calls.append({
-                                "id": f"call_write_{int(time.time())}",
-                                "type": "function",
-                                "function": {
-                                    "name": "write_file",
-                                    "arguments": json.dumps({"path": path, "content": content})
-                                }
-                            })
-            except Exception as e:
-                logger.warning(f"Failed to parse write_file: {e}")
-
-        # If tools detected, return structured response
-        if tool_calls:
-            return {
-                "content": response_text, # Keep reasoning
-                "tool_calls": tool_calls
-            }
-        
-        return response_text
+# Load configuration
+config = load_config()
+logger.info("Configuration loaded")
 
 # Global model instance
-engine = ModelEngine()
+engine = ModelEngine(config)
 
 @app.on_event("startup")
 async def startup_event():
