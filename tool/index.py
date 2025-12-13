@@ -125,6 +125,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     from .fetch import FetchTool
     from .dview import DataViewTool
     from .pyexe import PythonReplTool
+    from .memory import MemoryTool
     
     # Default to all enabled if no config provided
     if config is None:
@@ -134,6 +135,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             "enable_fetch": True,
             "enable_data_view": True,
             "enable_pyexe": True,
+            "enable_memory": True,
         }
     
     registry = ToolRegistry()
@@ -158,5 +160,9 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     
     if config.get("enable_pyexe", True):
         registry.register(PythonReplTool())
+    
+    # Memory tool (Phase 0.3)
+    if config.get("enable_memory", True):
+        registry.register(MemoryTool())
     
     return registry
