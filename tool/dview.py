@@ -285,10 +285,22 @@ class DataViewTool(BaseTool):
             )
         
         try:
+            # Import pyarrow for efficient metadata access
+            try:
+                import pyarrow.parquet as pq
+            except ImportError:
+                pq = None
+            
             if operation == "columns":
-                # Read just metadata
-                df = pd.read_parquet(path, engine='pyarrow')
-                columns = df.columns.tolist()
+                # Read only schema/metadata, not data
+                if pq:
+                    # Use PyArrow for efficient metadata access
+                    parquet_file = pq.ParquetFile(path)
+                    columns = parquet_file.schema.names
+                else:
+                    # Fallback: read with pandas (less efficient)
+                    df = pd.read_parquet(path, engine='pyarrow')
+                    columns = df.columns.tolist()
                 
                 output = f"Columns ({len(columns)}):\n"
                 output += "\n".join(f"  {i+1}. {col}" for i, col in enumerate(columns))
@@ -300,8 +312,17 @@ class DataViewTool(BaseTool):
                 )
             
             elif operation == "head":
-                df = pd.read_parquet(path, engine='pyarrow')
-                head = df.head(n_rows)
+                # Read only first N rows efficiently
+                if pq:
+                    # Use PyArrow to read only needed rows
+                    parquet_file = pq.ParquetFile(path)
+                    table = parquet_file.read_row_group(0)  # First row group
+                    df = table.to_pandas()
+                    head = df.head(n_rows)
+                else:
+                    # Fallback: read all (less efficient for large files)
+                    df = pd.read_parquet(path, engine='pyarrow')
+                    head = df.head(n_rows)
                 
                 return ToolResult(
                     tool_call_id="",
@@ -310,6 +331,8 @@ class DataViewTool(BaseTool):
                 )
             
             elif operation == "tail":
+                # Note: Tail is inherently inefficient for Parquet
+                # Would need to read entire file or use row group info
                 df = pd.read_parquet(path, engine='pyarrow')
                 tail = df.tail(n_rows)
                 
@@ -321,11 +344,21 @@ class DataViewTool(BaseTool):
                 )
             
             elif operation == "shape":
-                df = pd.read_parquet(path, engine='pyarrow')
-                n_rows, n_cols = df.shape
+                # Read only metadata for shape
+                if pq:
+                    # Use PyArrow for efficient metadata access
+                    parquet_file = pq.ParquetFile(path)
+                    n_rows = parquet_file.metadata.num_rows
+                    n_cols = len(parquet_file.schema.names)
+                    columns = parquet_file.schema.names
+                else:
+                    # Fallback: read all (less efficient)
+                    df = pd.read_parquet(path, engine='pyarrow')
+                    n_rows, n_cols = df.shape
+                    columns = df.columns.tolist()
                 
                 output = f"Shape: {n_rows} rows × {n_cols} columns\n"
-                output += f"Columns: {', '.join(df.columns.tolist())}"
+                output += f"Columns: {', '.join(columns)}"
                 
                 return ToolResult(
                     tool_call_id="",

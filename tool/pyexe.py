@@ -16,7 +16,7 @@ Rules:
 - Timeout protection for long-running code
 - Capture stdout and stderr separately
 - Clean error messages
-- Process isolation (separate from servr/api.py)
+- Process isolation (separate from server/api.py)
 
 This tool transforms the agent from "run script" to "interactive data scientist."
 """
@@ -364,8 +364,11 @@ while True:
         """Clean up subprocess on tool destruction."""
         await self._stop_process()
     
-    def __del__(self):
-        """Ensure cleanup on deletion."""
-        if self.process and self.process.returncode is None:
-            # Can't await in __del__, so just log
-            logger.warning(f"[{self.session_id}] Process still running at deletion")
+    async def __aenter__(self):
+        """Context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with cleanup."""
+        await self.cleanup()
+        return False
