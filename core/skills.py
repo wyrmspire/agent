@@ -284,9 +284,12 @@ class SkillCompiler:
         if not func_info.description or func_info.description == f"Function {function_name}":
             return False, "Function must have a docstring"
         
-        # Check for type hints
-        if not func_info.parameters.get("properties"):
-            return False, "Function must have type hints for parameters"
+        # Check for type hints on parameters (if any exist)
+        # Note: Functions with no parameters are valid
+        # Only check if function has parameters
+        if func_info.parameters.get("properties") is None:
+            # This shouldn't happen if parsing worked, but check anyway
+            return False, "Function schema is invalid"
         
         return True, "Function is valid"
 

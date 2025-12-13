@@ -146,8 +146,9 @@ class MemoryTool(BaseTool):
             self._memory_counter += 1
             memory_id = f"mem_{self._memory_counter}"
             
-            # For now, use a simple dummy embedding
-            # TODO: Use actual embedding gateway
+            # NOTE: Using placeholder embedding until embedding gateway is integrated
+            # Current search uses keyword matching, not semantic similarity
+            # TODO: Integrate with gate/embed.py for proper semantic search
             dummy_embedding = [0.0] * 768  # Standard embedding dimension
             
             # Store in vector store

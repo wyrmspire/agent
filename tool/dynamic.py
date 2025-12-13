@@ -119,13 +119,20 @@ class DynamicTool(BaseTool):
     def _build_execution_code(self, arguments: Dict[str, Any]) -> str:
         """Build Python code to execute the skill function.
         
+        This builds Python code that will be executed in an isolated pyexe subprocess.
+        The skill file has been validated and is from workspace/skills/, so we trust it.
+        String formatting is safe here because:
+        1. Skill files are validated before canonization
+        2. Code executes in isolated subprocess (can't affect main process)
+        3. Arguments are JSON-serialized for safety
+        
         Args:
             arguments: Function arguments
             
         Returns:
             Python code as string
         """
-        # Read the skill file
+        # Read the skill file (validated and trusted)
         with open(self._skill_file, 'r') as f:
             skill_code = f.read()
         

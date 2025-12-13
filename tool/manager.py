@@ -180,23 +180,23 @@ class PromoteSkillTool(BaseTool):
             
             # Step 5: Register as dynamic tool
             if self.registry:
+                # Override name if custom tool_name provided
+                if tool_name != function_name:
+                    func_info.name = tool_name
+                
+                # Create dynamic tool with updated func_info
                 dynamic_tool = DynamicTool(
                     func_info=func_info,
                     skill_file=str(skill_path),
                 )
                 
-                # Override name if custom tool_name provided
-                if tool_name != function_name:
-                    func_info.name = tool_name
-                
-                try:
-                    self.registry.register(dynamic_tool)
-                    logger.info(f"Registered dynamic tool: {tool_name}")
-                except ValueError as e:
-                    # Tool already exists - update it
+                # Check if tool already exists and unregister if needed
+                if self.registry.has(tool_name):
                     self.registry.unregister(tool_name)
-                    self.registry.register(dynamic_tool)
-                    logger.info(f"Updated dynamic tool: {tool_name}")
+                    logger.info(f"Updating existing tool: {tool_name}")
+                
+                self.registry.register(dynamic_tool)
+                logger.info(f"Registered dynamic tool: {tool_name}")
             
             output = f"""Skill promoted successfully!
 
