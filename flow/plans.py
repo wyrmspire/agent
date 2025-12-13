@@ -59,7 +59,7 @@ Examples:
 - List files: <tool name="list_files">{"path": "."}</tool>
 - Read file: <tool name="read_file">{"path": "data/config.json"}</tool>
 - Write file: <tool name="write_file">{"path": "output.txt", "content": "Hello world"}</tool>
-- Shell command: <tool name="shell">{"cmd": "echo hello"}</tool>
+- Shell command: <tool name="shell">{"command": "echo hello"}</tool>
 - Fetch URL: <tool name="fetch">{"url": "https://example.com"}</tool>
 
 IMPORTANT:

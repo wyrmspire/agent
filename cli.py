@@ -53,15 +53,42 @@ async def main():
     import argparse
     parser = argparse.ArgumentParser(description="Agent CLI")
     parser.add_argument("--mock", action="store_true", help="Use mock model instead of real server")
+    parser.add_argument("--gemini", action="store_true", help="Use Gemini API (requires GEMINI_API_KEY)")
     args = parser.parse_args()
 
-    # Create components
+    # Create gateway based on config/args
     try:
         if args.mock:
             print("[MOCK] Using MOCK Gateway (no real model connection)")
             from gate.mock import MockGateway
             gateway = MockGateway()
+        
+        elif args.gemini or config["gateway"] == "gemini":
+            # Use Gemini API
+            api_key = config["gemini_api_key"]
+            if not api_key:
+                print("[ERROR] GEMINI_API_KEY not set in .env")
+                return 1
+            
+            from gate.gemini import GeminiGateway
+            print(f"[GEMINI] Using Gemini API ({config['gemini_model']})")
+            gateway = GeminiGateway(
+                api_key=api_key,
+                model=config["gemini_model"],
+            )
+            
+            # Health check
+            print("Checking Gemini API...")
+            healthy = await gateway.health_check()
+            if not healthy:
+                print("[ERROR] Cannot connect to Gemini API")
+                print("   Check your GEMINI_API_KEY")
+                return 1
+            
+            print("[OK] Connected to Gemini API\n")
+        
         else:
+            # Default: local model server
             gateway = LMStudioGateway(
                 base_url=config["model_url"],
                 model=config["model"],

@@ -71,11 +71,18 @@ def load_config() -> Dict[str, Any]:
         "port": int(os.getenv("AGENT_PORT", "8000")),
         "enable_http": os.getenv("AGENT_ENABLE_HTTP", "false").lower() == "true",
         
-        # Model config
+        # Gateway selection: "local" (default) or "gemini"
+        "gateway": os.getenv("AGENT_GATEWAY", "local"),
+        
+        # Model config (for local gateway)
         "model": os.getenv("AGENT_MODEL", "qwen2.5-coder"),
         "model_url": os.getenv("AGENT_MODEL_URL", "http://localhost:1234/v1"),
         "model_api_key": os.getenv("AGENT_MODEL_API_KEY", ""),
         "model_path": os.getenv("AGENT_MODEL_PATH", ""),
+        
+        # Gemini config (reads from .env, NOT .env.example)
+        "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         
         # Agent config
         "max_steps": int(os.getenv("AGENT_MAX_STEPS", "20")),

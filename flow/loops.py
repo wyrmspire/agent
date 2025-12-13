@@ -181,6 +181,19 @@ class AgentLoop:
                 # Execute tools (with per-tool budget enforcement)
                 tool_results, budget_hit = await self._execute_tools(state, response.tool_calls)
                 
+                # Print tool results to terminal for user visibility
+                for i, result in enumerate(tool_results):
+                    tool_name = response.tool_calls[i].name if i < len(response.tool_calls) else "unknown"
+                    print(f"\n📦 [{tool_name}]")
+                    if result.success:
+                        # Truncate very long outputs for terminal display
+                        output = result.output
+                        if len(output) > 2000:
+                            output = output[:2000] + f"\n... [truncated, {len(result.output)} chars total]"
+                        print(output)
+                    else:
+                        print(f"❌ Error: {result.error}")
+                
                 # Add tool results to conversation
                 for result in tool_results:
                     state.conversation.add_message(Message(
