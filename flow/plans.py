@@ -22,6 +22,7 @@ from core.types import Message, MessageRole, Tool
 def create_system_prompt(
     tools: List[Tool],
     project_context: Optional[Dict[str, Any]] = None,
+    enable_tool_discipline: bool = True,
 ) -> str:
     """Create system prompt for tool-using agent.
     
@@ -29,9 +30,12 @@ def create_system_prompt(
     - Its role as a helpful assistant
     - How to use tools effectively
     - When to call tools vs answer directly
+    - Tool-first workflow discipline (Phase 0.5)
     
     Args:
         tools: Available tools
+        project_context: Optional project context
+        enable_tool_discipline: Enable Phase 0.5 tool discipline rules
         
     Returns:
         System prompt string
@@ -63,6 +67,45 @@ IMPORTANT:
 - All file paths are relative to the workspace directory
 - Arguments must be valid JSON inside the tool tag
 - Only call ONE tool at a time and wait for the result
+"""
+    
+    # Phase 0.5: Add tool-first discipline
+    if enable_tool_discipline:
+        base_prompt += """
+
+TOOL-FIRST WORKFLOW (Phase 0.5 - Required):
+When working with code, you MUST follow this disciplined workflow:
+
+1. LIST/READ → Explore before acting
+   - Use list_files to see what exists
+   - Use read_file to understand current code
+   - Do NOT skip this step
+
+2. WRITE → Make targeted changes
+   - Use write_file or edit_file for modifications
+   - Keep changes focused and minimal
+   - Document what you changed
+
+3. TEST → Verify your changes work
+   - ALWAYS run tests after writing code
+   - Use shell to run pytest, unittest, or project-specific tests
+   - Read test output carefully
+
+4. SUMMARIZE → Report results
+   - Explain what you did
+   - Report test results
+   - Suggest next steps if needed
+
+ANTI-PATTERNS TO AVOID:
+❌ Writing code without running tests
+❌ Calling shell repeatedly when errors occur (read the error first!)
+❌ Making changes without reading existing code first
+❌ Ignoring tool failures
+
+TOOL BUDGET:
+- You have a limited number of tool calls per step
+- Use them wisely - plan before acting
+- If you hit the limit, summarize progress and continue in next step
 """
     
     if tools:
