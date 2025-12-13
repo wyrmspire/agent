@@ -31,7 +31,7 @@ from .bases import BaseTool, create_json_schema
 
 
 class ListFiles(BaseTool):
-    """List files in a directory within workspace."""
+    """List files in a directory."""
     
     def __init__(self, workspace: Optional[Workspace] = None):
         """Initialize with workspace.
@@ -47,7 +47,7 @@ class ListFiles(BaseTool):
     
     @property
     def description(self) -> str:
-        return "List files and directories in a given path within workspace. Returns names, types, and sizes."
+        return "List files and directories. Shows project structure (read-only) and workspace/ folder (writable). Use '.' for project root."
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -55,7 +55,7 @@ class ListFiles(BaseTool):
             properties={
                 "path": {
                     "type": "string",
-                    "description": "Directory path to list (relative to workspace)",
+                    "description": "Directory path to list. Use '.' for project root. The workspace/ folder is writable, rest is read-only.",
                 },
             },
             required=["path"],
@@ -66,14 +66,15 @@ class ListFiles(BaseTool):
         path_str = arguments["path"]
         
         try:
-            # Try workspace first
+            # For listing, try PROJECT first (so agent sees project structure)
+            # This way '.' shows the project root with flow/, core/, etc.
             try:
-                path = self.workspace.resolve_read(path_str)
-                is_project = False
-            except WorkspaceError:
-                # Fall back to project read (read-only)
                 path = self.workspace.resolve_project_read(path_str)
                 is_project = True
+            except WorkspaceError:
+                # Fall back to workspace-only paths
+                path = self.workspace.resolve_read(path_str)
+                is_project = False
             
             if not path.is_dir():
                 return ToolResult(
@@ -115,7 +116,11 @@ class ListFiles(BaseTool):
             output_lines = [f"{prefix}Contents of {rel_path}:"]
             for entry in entries:
                 if entry["type"] == "dir":
-                    output_lines.append(f"  📁 {entry['name']}/")
+                    # Mark workspace as writable in project listings
+                    if is_project and entry["name"] == "workspace":
+                        output_lines.append(f"  📁 {entry['name']}/ [WRITABLE]")
+                    else:
+                        output_lines.append(f"  📁 {entry['name']}/")
                 else:
                     size = entry.get("size", 0)
                     output_lines.append(f"  📄 {entry['name']} ({size} bytes)")
@@ -143,17 +148,24 @@ class ListFiles(BaseTool):
 
 
 class ReadFile(BaseTool):
-    """Read contents of a file within workspace."""
+    """Read contents of a file within workspace with optional line ranges."""
     
-    def __init__(self, workspace: Optional[Workspace] = None, max_size: int = 1_000_000):
+    def __init__(
+        self, 
+        workspace: Optional[Workspace] = None, 
+        max_size: int = 1_000_000,
+        default_max_lines: int = 200,  # Default chunk size
+    ):
         """Initialize with workspace.
         
         Args:
             workspace: Workspace instance (uses default if None)
-            max_size: Maximum file size to read
+            max_size: Maximum file size in bytes to read
+            default_max_lines: Default max lines to return if no range specified
         """
         self.workspace = workspace or get_default_workspace()
         self.max_size = max_size
+        self.default_max_lines = default_max_lines
     
     @property
     def name(self) -> str:
@@ -161,7 +173,11 @@ class ReadFile(BaseTool):
     
     @property
     def description(self) -> str:
-        return f"Read the contents of a file (up to {self.max_size} bytes). Can read workspace files and project files (read-only)."
+        return (
+            f"Read file contents. For large files, use start_line/end_line to read in chunks. "
+            f"Without line range, returns first {self.default_max_lines} lines with total line count. "
+            f"Can read workspace files (writable) and project files (read-only)."
+        )
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -171,13 +187,23 @@ class ReadFile(BaseTool):
                     "type": "string",
                     "description": "File path to read (relative to workspace or project root)",
                 },
+                "start_line": {
+                    "type": "integer",
+                    "description": "Start line (1-indexed, inclusive). Use with end_line to read chunks.",
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "End line (1-indexed, inclusive). Use with start_line to read chunks.",
+                },
             },
             required=["path"],
         )
     
     async def execute(self, arguments: Dict[str, Any]) -> ToolResult:
-        """Read file contents."""
+        """Read file contents, optionally by line range."""
         path_str = arguments["path"]
+        start_line = arguments.get("start_line")
+        end_line = arguments.get("end_line")
         
         try:
             # Try workspace first
@@ -203,25 +229,53 @@ class ReadFile(BaseTool):
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error=f"File too large: {size} bytes (max {self.max_size}). Use data view tool for large files.",
+                    error=f"File too large: {size} bytes (max {self.max_size}). Use data_view tool.",
                     success=False,
                 )
             
-            # Read file
+            # Read file as lines
             content = path.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            total_lines = len(lines)
             
-            # Add header for project files
+            # Determine line range to return
+            if start_line is not None and end_line is not None:
+                # User specified range (1-indexed)
+                start_idx = max(0, start_line - 1)
+                end_idx = min(total_lines, end_line)
+                selected_lines = lines[start_idx:end_idx]
+                range_info = f"[Lines {start_line}-{end_line} of {total_lines}]"
+            elif start_line is not None:
+                # Start line only - read to end or max
+                start_idx = max(0, start_line - 1)
+                end_idx = min(total_lines, start_idx + self.default_max_lines)
+                selected_lines = lines[start_idx:end_idx]
+                range_info = f"[Lines {start_line}-{end_idx} of {total_lines}]"
+            else:
+                # No range - return first N lines
+                if total_lines <= self.default_max_lines:
+                    selected_lines = lines
+                    range_info = f"[{total_lines} lines total]"
+                else:
+                    selected_lines = lines[:self.default_max_lines]
+                    range_info = f"[Lines 1-{self.default_max_lines} of {total_lines}. Use start_line/end_line for more.]"
+            
+            # Rebuild content from selected lines
+            output_content = "\n".join(selected_lines)
+            
+            # Build header
             if is_project:
                 try:
                     rel_path = path.relative_to(self.workspace.project_root)
                 except ValueError:
                     rel_path = path
-                header = f"[PROJECT READ-ONLY: {rel_path}]\n{'='*60}\n"
-                content = header + content
+                header = f"[PROJECT READ-ONLY: {rel_path}] {range_info}\n{'='*60}\n"
+            else:
+                header = f"[{path.name}] {range_info}\n{'='*60}\n"
             
             return ToolResult(
                 tool_call_id="",
-                output=content,
+                output=header + output_content,
                 success=True,
             )
         
@@ -265,7 +319,7 @@ class WriteFile(BaseTool):
     
     @property
     def description(self) -> str:
-        return "Write content to a file within workspace. Creates parent directories if needed. Overwrites existing files. Checks resource limits before writing."
+        return "Write content to a file. Files are saved in the workspace/ folder (writable sandbox). Project files outside workspace/ are read-only."
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -273,7 +327,7 @@ class WriteFile(BaseTool):
             properties={
                 "path": {
                     "type": "string",
-                    "description": "File path to write (relative to workspace)",
+                    "description": "File path to write. Path will be created inside workspace/. Use 'myfile.txt' not 'workspace/myfile.txt'.",
                 },
                 "content": {
                     "type": "string",
@@ -287,6 +341,12 @@ class WriteFile(BaseTool):
         """Write content to file."""
         path_str = arguments["path"]
         content = arguments["content"]
+        
+        # Strip workspace/ prefix if agent includes it (they see it in project root listing)
+        if path_str.startswith("workspace/"):
+            path_str = path_str[len("workspace/"):]
+        elif path_str.startswith("workspace\\"):
+            path_str = path_str[len("workspace\\"):]
         
         try:
             # Check resource limits before writing (circuit breaker)

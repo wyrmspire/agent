@@ -36,7 +36,7 @@ class LMStudioGateway(ModelGateway):
         self,
         base_url: str = "http://localhost:1234/v1",
         model: str = "qwen2.5-coder",
-        timeout: float = 60.0,
+        timeout: float = 180.0,  # Increased for large context (was 60s)
     ):
         super().__init__(model)
         self.base_url = base_url.rstrip("/")

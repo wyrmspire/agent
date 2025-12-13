@@ -235,6 +235,14 @@ class ModelEngine:
             tool_args_str = match.group(2).strip()
             
             try:
+                # Sanitize JSON before parsing (fix common model mistakes)
+                # 1. Escaped single quotes \' → ' (invalid in JSON)
+                # 2. Python booleans True/False → JSON true/false
+                tool_args_str = tool_args_str.replace("\\'", "'")
+                tool_args_str = re.sub(r'\bTrue\b', 'true', tool_args_str)
+                tool_args_str = re.sub(r'\bFalse\b', 'false', tool_args_str)
+                tool_args_str = re.sub(r'\bNone\b', 'null', tool_args_str)
+                
                 # Parse JSON arguments
                 tool_args = json.loads(tool_args_str)
                 
