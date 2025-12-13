@@ -165,4 +165,17 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     if config.get("enable_memory", True):
         registry.register(MemoryTool())
     
+    # Skill management tool (Phase 0.4)
+    if config.get("enable_promote_skill", True):
+        from .manager import PromoteSkillTool
+        registry.register(PromoteSkillTool(registry=registry))
+    
+    # Load dynamic skills (Phase 0.4)
+    if config.get("load_dynamic_skills", True):
+        from .manager import load_dynamic_skills
+        loaded = load_dynamic_skills(registry)
+        if loaded > 0:
+            import logging
+            logging.getLogger(__name__).info(f"Loaded {loaded} dynamic skills")
+    
     return registry
