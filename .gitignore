@@ -61,3 +61,6 @@ node_modules/
 
 # Agent Output
 dump*.md
+
+# Workspace (Phase 0.2)
+workspace/
