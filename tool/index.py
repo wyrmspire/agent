@@ -123,6 +123,8 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     from .files import ListFiles, ReadFile, WriteFile
     from .shell import ShellTool
     from .fetch import FetchTool
+    from .dview import DataViewTool
+    from .pyexe import PythonReplTool
     
     # Default to all enabled if no config provided
     if config is None:
@@ -130,6 +132,8 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             "enable_files": True,
             "enable_shell": True,
             "enable_fetch": True,
+            "enable_data_view": True,
+            "enable_pyexe": True,
         }
     
     registry = ToolRegistry()
@@ -147,5 +151,12 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     # HTTP tool
     if config.get("enable_fetch", True):
         registry.register(FetchTool())
+    
+    # Data science tools (Phase 0.2)
+    if config.get("enable_data_view", True):
+        registry.register(DataViewTool())
+    
+    if config.get("enable_pyexe", True):
+        registry.register(PythonReplTool())
     
     return registry

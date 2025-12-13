@@ -86,6 +86,8 @@ def load_config() -> Dict[str, Any]:
         "enable_shell": os.getenv("AGENT_ENABLE_SHELL", "true").lower() == "true",
         "enable_files": os.getenv("AGENT_ENABLE_FILES", "true").lower() == "true",
         "enable_fetch": os.getenv("AGENT_ENABLE_FETCH", "true").lower() == "true",
+        "enable_data_view": os.getenv("AGENT_ENABLE_DATA_VIEW", "true").lower() == "true",
+        "enable_pyexe": os.getenv("AGENT_ENABLE_PYEXE", "true").lower() == "true",
         
         # Storage config
         "store_type": os.getenv("AGENT_STORE_TYPE", "memory"),
