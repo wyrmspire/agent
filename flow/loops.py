@@ -191,10 +191,31 @@ class AgentLoop:
                 
                 # If budget was hit mid-batch, inject guidance
                 if budget_hit:
-                    skipped = len(response.tool_calls) - len(tool_results)
+                    skipped_calls = response.tool_calls[len(tool_results):]
+                    skipped = len(skipped_calls)
+                    
+                    # Phase 0.5 enhancement: Check if tests were skipped due to budget
+                    # This gives a more actionable nudge than generic "budget hit"
+                    test_keywords = ["pytest", "unittest", "npm test", "pnpm test", "yarn test", "go test"]
+                    wrote_code = any(
+                        tc.name in ["write_file", "edit_file", "create_file"]
+                        for tc in response.tool_calls[:len(tool_results)]
+                    )
+                    tests_skipped = any(
+                        tc.name == "shell" and 
+                        any(kw in str(tc.arguments.get("cmd", "") or tc.arguments.get("command", "")).lower()
+                            for kw in test_keywords)
+                        for tc in skipped_calls
+                    )
+                    
+                    if wrote_code and tests_skipped:
+                        nudge = f"⚠️ Tests were skipped due to tool budget ({skipped} tool(s)). Run tests in the next step."
+                    else:
+                        nudge = f"⚠️ Tool budget hit mid-batch. {skipped} tool(s) skipped. Replan next step with remaining work."
+                    
                     state.conversation.add_message(Message(
                         role=MessageRole.SYSTEM,
-                        content=f"⚠️ Tool budget hit mid-batch. {skipped} tool(s) skipped. Replan next step with remaining work.",
+                        content=nudge,
                     ))
                 
                 # Phase 0.5: Check workflow discipline with judge
