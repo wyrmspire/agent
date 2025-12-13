@@ -52,9 +52,14 @@ class SQLiteMemory(MemoryStore):
                 content TEXT NOT NULL,
                 name TEXT,
                 tool_calls TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_conversation (conversation_id)
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+        """)
+        
+        # Create index
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversation 
+            ON messages(conversation_id)
         """)
         
         # Create conversations table

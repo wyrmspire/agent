@@ -194,7 +194,11 @@ class LMStudioGateway(ModelGateway):
                         finish_reason=finish_reason,
                     )
                 
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    # Log malformed JSON for debugging
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Malformed JSON in stream: {line[:100]} - {e}")
                     continue
     
     async def health_check(self) -> bool:

@@ -78,6 +78,7 @@ class ShellTool(BaseTool):
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+                # Note: tool_call_id will be set by BaseTool.call()
                 return ToolResult(
                     tool_call_id="",
                     output="",
@@ -110,6 +111,7 @@ class ShellTool(BaseTool):
             )
         
         except Exception as e:
+            # Note: tool_call_id will be set by BaseTool.call()
             return ToolResult(
                 tool_call_id="",
                 output="",
