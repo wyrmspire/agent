@@ -66,8 +66,14 @@ class ListFiles(BaseTool):
         path_str = arguments["path"]
         
         try:
-            # Resolve path within workspace
-            path = self.workspace.resolve_read(path_str)
+            # Try workspace first
+            try:
+                path = self.workspace.resolve_read(path_str)
+                is_project = False
+            except WorkspaceError:
+                # Fall back to project read (read-only)
+                path = self.workspace.resolve_project_read(path_str)
+                is_project = True
             
             if not path.is_dir():
                 return ToolResult(
@@ -80,6 +86,10 @@ class ListFiles(BaseTool):
             # List entries
             entries = []
             for item in sorted(path.iterdir()):
+                # Skip hidden files in project (like .git)
+                if is_project and item.name.startswith('.'):
+                    continue
+                    
                 entry = {
                     "name": item.name,
                     "type": "dir" if item.is_dir() else "file",
@@ -91,8 +101,18 @@ class ListFiles(BaseTool):
                 entries.append(entry)
             
             # Format output
-            rel_path = self.workspace.get_relative_path(path)
-            output_lines = [f"Contents of {rel_path}:"]
+            if is_project:
+                # For project paths, show relative to project root
+                try:
+                    rel_path = path.relative_to(self.workspace.project_root)
+                except ValueError:
+                    rel_path = path
+                prefix = "[PROJECT READ-ONLY] "
+            else:
+                rel_path = self.workspace.get_relative_path(path)
+                prefix = ""
+            
+            output_lines = [f"{prefix}Contents of {rel_path}:"]
             for entry in entries:
                 if entry["type"] == "dir":
                     output_lines.append(f"  📁 {entry['name']}/")
@@ -141,7 +161,7 @@ class ReadFile(BaseTool):
     
     @property
     def description(self) -> str:
-        return f"Read the contents of a file within workspace (up to {self.max_size} bytes). Returns file content as text."
+        return f"Read the contents of a file (up to {self.max_size} bytes). Can read workspace files and project files (read-only)."
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -149,7 +169,7 @@ class ReadFile(BaseTool):
             properties={
                 "path": {
                     "type": "string",
-                    "description": "File path to read (relative to workspace)",
+                    "description": "File path to read (relative to workspace or project root)",
                 },
             },
             required=["path"],
@@ -160,8 +180,14 @@ class ReadFile(BaseTool):
         path_str = arguments["path"]
         
         try:
-            # Resolve path within workspace
-            path = self.workspace.resolve_read(path_str)
+            # Try workspace first
+            try:
+                path = self.workspace.resolve_read(path_str)
+                is_project = False
+            except WorkspaceError:
+                # Fall back to project read (read-only)
+                path = self.workspace.resolve_project_read(path_str)
+                is_project = True
             
             if not path.is_file():
                 return ToolResult(
@@ -183,6 +209,15 @@ class ReadFile(BaseTool):
             
             # Read file
             content = path.read_text(encoding="utf-8")
+            
+            # Add header for project files
+            if is_project:
+                try:
+                    rel_path = path.relative_to(self.workspace.project_root)
+                except ValueError:
+                    rel_path = path
+                header = f"[PROJECT READ-ONLY: {rel_path}]\n{'='*60}\n"
+                content = header + content
             
             return ToolResult(
                 tool_call_id="",

@@ -100,28 +100,72 @@ def load_config() -> Dict[str, Any]:
     return config
 
 
-def setup_logging(level: str = None) -> None:
-    """Setup logging configuration.
+def setup_logging(level: str = None, session_id: str = None) -> str:
+    """Setup logging configuration with file and console output.
     
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        session_id: Optional session ID for log file name
+        
+    Returns:
+        Path to the session log file
     """
+    from datetime import datetime
+    
     if level is None:
         level = os.getenv("AGENT_LOG_LEVEL", "INFO")
     
     # Convert string to logging level
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     
-    # Configure logging
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    # Create logs directory
+    project_root = get_project_root()
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    
+    # Generate session log filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if session_id:
+        log_filename = f"session_{timestamp}_{session_id[:8]}.log"
+    else:
+        log_filename = f"session_{timestamp}.log"
+    log_path = logs_dir / log_filename
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Capture all, filter at handler level
+    
+    # Clear existing handlers
+    root_logger.handlers.clear()
+    
+    # Console handler (shows INFO and above)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(numeric_level)
+    console_formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
     )
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+    
+    # File handler (captures everything with verbose format)
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s (%(filename)s:%(lineno)d): %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler.setFormatter(file_formatter)
+    root_logger.addHandler(file_handler)
     
     # Reduce noise from libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    
+    # Log session start
+    logging.info(f"Session log started: {log_path}")
+    
+    return str(log_path)
 
 
 def setup_python_path() -> None:

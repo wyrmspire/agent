@@ -44,9 +44,14 @@ class Workspace:
     workspace directory, preventing access to source code and config files.
     It also monitors resource usage to prevent system crashes.
     
+    Read-only project access:
+        The agent can READ files from the project root but can only WRITE
+        to the workspace directory. Sensitive files (.env, secrets) are blocked.
+    
     Example:
         ws = Workspace("/home/user/agent/workspace")
-        safe_path = ws.resolve("data/prices.csv")  # OK
+        safe_path = ws.resolve("data/prices.csv")  # OK - workspace
+        ws.resolve_project_read("flow/loops.py")   # OK - read-only project
         ws.resolve("../servr/api.py")  # Raises WorkspaceError
     """
     
@@ -55,6 +60,7 @@ class Workspace:
         workspace_root: Union[str, Path],
         max_workspace_size_gb: float = 5.0,
         min_free_ram_percent: float = 10.0,
+        allow_project_read: bool = True,
     ):
         """Initialize workspace with root directory and resource limits.
         
@@ -62,32 +68,87 @@ class Workspace:
             workspace_root: Root directory for workspace operations
             max_workspace_size_gb: Maximum workspace size in GB (default: 5GB)
             min_free_ram_percent: Minimum free RAM percentage (default: 10%)
+            allow_project_read: Allow read-only access to project files (default: True)
         """
         self.root = Path(workspace_root).resolve()
         self.max_workspace_size_bytes = int(max_workspace_size_gb * 1024 * 1024 * 1024)
         self.min_free_ram_percent = min_free_ram_percent
+        self.allow_project_read = allow_project_read
         
         # Create workspace if it doesn't exist
         self.root.mkdir(parents=True, exist_ok=True)
         
-        # Define blocked directories (relative to project root)
-        project_root = self.root.parent
-        self.blocked_dirs = [
-            project_root / ".env",
-            project_root / "servr",
-            project_root / "boot",
-            project_root / "core",
-            project_root / "gate",
-            project_root / "flow",
-            project_root / "model",
+        # Project root is parent of workspace
+        self._project_root = self.root.parent
+        
+        # Sensitive files that are NEVER readable (even with project read enabled)
+        self.sensitive_patterns = [
+            ".env",
+            ".env.*",
+            "*.pem",
+            "*.key",
+            "*secret*",
+            "*credentials*",
+            ".git/",
         ]
         
-        # Define blocked files
-        self.blocked_files = [
-            project_root / ".env",
-            project_root / ".env.example",
-            project_root / "requirements.txt",
+        # Directories blocked for WRITE operations (relative to project root)
+        self.blocked_write_dirs = [
+            self._project_root / "servr",
+            self._project_root / "boot",
+            self._project_root / "core",
+            self._project_root / "gate",
+            self._project_root / "flow",
+            self._project_root / "model",
+            self._project_root / "tool",
+            self._project_root / "tests",
         ]
+        
+        # Files blocked from any access
+        self.blocked_files = [
+            self._project_root / ".env",
+            self._project_root / ".env.example",
+            self._project_root / ".env.local",
+        ]
+    
+    @property
+    def project_root(self) -> Path:
+        """Get the project root directory (parent of workspace)."""
+        return self._project_root
+    
+    @property
+    def base_path(self) -> Path:
+        """Get the base path of the workspace (alias for root)."""
+        return self.root
+    
+    def _is_sensitive_file(self, path: Path) -> bool:
+        """Check if a file matches sensitive patterns."""
+        name = path.name.lower()
+        path_str = str(path).lower()
+        
+        for pattern in self.sensitive_patterns:
+            if pattern.startswith("*") and pattern.endswith("*"):
+                # Contains pattern
+                if pattern[1:-1] in name:
+                    return True
+            elif pattern.startswith("*"):
+                # Ends with pattern
+                if name.endswith(pattern[1:]):
+                    return True
+            elif pattern.endswith("*"):
+                # Starts with pattern
+                if name.startswith(pattern[:-1]):
+                    return True
+            elif pattern.endswith("/"):
+                # Directory pattern
+                if f"/{pattern}" in path_str or path_str.endswith(pattern[:-1]):
+                    return True
+            else:
+                # Exact match
+                if name == pattern:
+                    return True
+        
+        return False
     
     @property
     def base_path(self) -> Path:
@@ -133,22 +194,70 @@ class Workspace:
                 f"Path '{path}' is outside workspace (must be within {self.root})"
             )
         
-        # Check if path accesses blocked directories
-        for blocked_dir in self.blocked_dirs:
-            try:
-                resolved.relative_to(blocked_dir)
-                raise WorkspaceError(
-                    f"Access to '{blocked_dir.name}/' is blocked for safety"
-                )
-            except ValueError:
-                # Path is not under blocked_dir, which is good
-                pass
+        # Workspace paths don't need blocked dir checks (they're already in workspace)
+        # But check if path is a blocked file
+        if resolved in self.blocked_files:
+            raise WorkspaceError(
+                f"Access to '{resolved.name}' is blocked for safety"
+            )
+        
+        return resolved
+    
+    def resolve_project_read(self, path: Union[str, Path]) -> Path:
+        """Resolve a path for READ-ONLY access to project files.
+        
+        This allows the agent to read source code files but not modify them.
+        Sensitive files (.env, secrets, keys) are still blocked.
+        
+        Args:
+            path: Path to resolve (relative to project root or absolute)
+            
+        Returns:
+            Resolved absolute path within project
+            
+        Raises:
+            WorkspaceError: If path is outside project, blocked, or sensitive
+        """
+        if not self.allow_project_read:
+            raise WorkspaceError("Project read access is disabled")
+        
+        # Convert to Path object
+        if isinstance(path, str):
+            path = Path(path)
+        
+        # If path is relative, make it relative to project root
+        if not path.is_absolute():
+            path = self._project_root / path
+        
+        # Resolve to absolute path
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError) as e:
+            raise WorkspaceError(f"Cannot resolve path: {e}")
+        
+        # Check if path is within project
+        try:
+            resolved.relative_to(self._project_root)
+        except ValueError:
+            raise WorkspaceError(
+                f"Path '{path}' is outside project (must be within {self._project_root})"
+            )
         
         # Check if path is a blocked file
         if resolved in self.blocked_files:
             raise WorkspaceError(
                 f"Access to '{resolved.name}' is blocked for safety"
             )
+        
+        # Check if path matches sensitive patterns
+        if self._is_sensitive_file(resolved):
+            raise WorkspaceError(
+                f"Access to '{resolved.name}' is blocked (sensitive file)"
+            )
+        
+        # Verify file exists for read operations
+        if not resolved.exists():
+            raise WorkspaceError(f"Path does not exist: {resolved}")
         
         return resolved
     
