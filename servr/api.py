@@ -15,6 +15,7 @@ Usage:
 import bitsandbytes # Trigger potential DLL load fix
 import time
 import logging
+import json
 from typing import List, Optional, Dict, Any, Union
 import torch
 from pydantic import BaseModel, Field
@@ -149,10 +150,77 @@ class ModelEngine:
         new_tokens = outputs[0][inputs.input_ids.shape[1]:]
         response_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
         
-        # Simple heuristic to detect tool calls from strict text (if model isn't fine-tuned for structured output)
-        # Note: Qwen 2.5 Coder Instruct is good, but we might need specific prompting for tools.
-        # For now, we return the text.
-        # If we wanted to parse "Tool Call: ..." we would do it here.
+        # ---------------------------------------------------------------------
+        # Heuristic Tool Parser (Adapter for Text -> Structured)
+        # ---------------------------------------------------------------------
+        # Qwen-Coder tends to write shell commands or function calls in text.
+        # We catch them here and convert to OpenAI Tool Calls.
+        
+        import re
+        import time
+        import shlex
+        
+        tool_calls = []
+        
+        # Regex for common patterns
+        # 1. list_files <path>
+        # 2. write_file <path> <content> (content might be quoted)
+        # 3. fetch <url>
+        # 4. shell <cmd> (or just raw shell commands if in code block)
+        
+        # Check for list_files
+        ls_match = re.search(r"list_files\s+([^\s\n]+)", response_text)
+        if ls_match:
+            tool_calls.append({
+                "id": f"call_ls_{int(time.time())}",
+                "type": "function",
+                "function": {
+                    "name": "list_files",
+                    "arguments": f'{{"path": "{ls_match.group(1)}"}}'
+                }
+            })
+            
+        # Check for fetch
+        fetch_match = re.search(r"fetch\s+(https?://[^\s\n]+)", response_text)
+        if fetch_match:
+            tool_calls.append({
+                "id": f"call_fetch_{int(time.time())}",
+                "type": "function",
+                "function": {
+                    "name": "fetch",
+                    "arguments": f'{{"url": "{fetch_match.group(1)}"}}'
+                }
+            })
+            
+        # Check for write_file (naive quote parsing)
+        # Matches: write_file path "content" OR write_file path 'content'
+        if "write_file" in response_text:
+            try:
+                # Use shlex to handle quotes correctly
+                # Find the line with write_file
+                for line in response_text.splitlines():
+                    if line.strip().startswith("write_file"):
+                        parts = shlex.split(line.strip())
+                        if len(parts) >= 3:
+                            path = parts[1]
+                            content = parts[2]
+                            tool_calls.append({
+                                "id": f"call_write_{int(time.time())}",
+                                "type": "function",
+                                "function": {
+                                    "name": "write_file",
+                                    "arguments": json.dumps({"path": path, "content": content})
+                                }
+                            })
+            except Exception as e:
+                logger.warning(f"Failed to parse write_file: {e}")
+
+        # If tools detected, return structured response
+        if tool_calls:
+            return {
+                "content": response_text, # Keep reasoning
+                "tool_calls": tool_calls
+            }
         
         return response_text
 
