@@ -48,6 +48,8 @@ class AgentJudge:
     - Are tools being used effectively?
     - Is the agent making progress?
     - Are there issues to address?
+    
+    Phase 0.5: Enhanced with actionable "do this next" guidance.
     """
     
     def __init__(self):
@@ -182,4 +184,74 @@ class AgentJudge:
         return Judgment(
             passed=True,
             reason="Answer quality looks good",
+        )
+    
+    def check_workflow_discipline(self, steps: List[Step]) -> Judgment:
+        """Check if agent followed tool-first workflow (Phase 0.5).
+        
+        Detects common anti-patterns:
+        - Writing code without running tests
+        - Calling shell repeatedly without reading errors
+        - Not following list/read → write → test → summarize pattern
+        
+        Args:
+            steps: Execution steps so far
+            
+        Returns:
+            Judgment with actionable guidance
+        """
+        if len(steps) == 0:
+            return Judgment(passed=True, reason="No steps yet")
+        
+        # Check: Did agent write code without running tests?
+        write_tools = ["write_file", "edit_file", "create_file"]
+        test_tools = ["shell"]  # Assumes tests run via shell
+        
+        has_write = False
+        has_test_after_write = False
+        write_step_idx = -1
+        
+        for i, step in enumerate(steps):
+            if step.tool_calls:
+                for tc in step.tool_calls:
+                    if tc.name in write_tools:
+                        has_write = True
+                        write_step_idx = i
+            
+            # Check tool results in OBSERVE steps
+            if step.step_type == StepType.OBSERVE and has_write and i > write_step_idx:
+                if step.tool_results:
+                    for result in step.tool_results:
+                        result_text = ((result.output or "") + (result.error or "")).lower()
+                        if any(keyword in result_text 
+                               for keyword in ["test", "pytest", "unittest"]):
+                            has_test_after_write = True
+        
+        if has_write and not has_test_after_write:
+            return Judgment(
+                passed=False,
+                reason="Code was written but tests were not run",
+                severity="warning",
+                suggestion="DO THIS NEXT: Run tests to verify your code changes work correctly.",
+            )
+        
+        # Check: Repeated shell calls with errors?
+        recent_shell_errors = []
+        for step in steps[-5:]:  # Last 5 steps
+            if step.step_type == StepType.OBSERVE and step.tool_results:
+                for result in step.tool_results:
+                    if not result.success and result.error:
+                        recent_shell_errors.append(result.error)
+        
+        if len(recent_shell_errors) >= 2:
+            return Judgment(
+                passed=False,
+                reason="Calling shell repeatedly without reading errors",
+                severity="warning",
+                suggestion=f"DO THIS NEXT: Read and analyze the error: {recent_shell_errors[-1][:100]}...",
+            )
+        
+        return Judgment(
+            passed=True,
+            reason="Workflow discipline looks good",
         )

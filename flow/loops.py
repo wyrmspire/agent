@@ -31,6 +31,7 @@ from core.state import AgentState, ConversationState, ExecutionContext
 from core.rules import RuleEngine
 from gate.bases import ModelGateway
 from tool.index import ToolRegistry
+from flow.judge import AgentJudge
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +74,14 @@ class AgentLoop:
         rule_engine: RuleEngine,
         max_steps: int = 20,
         temperature: float = 0.7,
+        enable_judge: bool = True,  # Phase 0.5: Judge guidance
     ):
         self.gateway = gateway
         self.tools = tools
         self.rule_engine = rule_engine
         self.max_steps = max_steps
         self.temperature = temperature
+        self.judge = AgentJudge() if enable_judge else None
     
     async def run(
         self,
@@ -161,6 +164,15 @@ class AgentLoop:
             if response.tool_calls:
                 logger.info(f"Model requested {len(response.tool_calls)} tool calls")
                 
+                # Phase 0.5: Check tool budget
+                if not state.execution.can_use_tool():
+                    logger.warning(f"Tool budget exceeded for step {step_num}")
+                    state.conversation.add_message(Message(
+                        role=MessageRole.ASSISTANT,
+                        content="I've reached the tool budget limit for this step. Let me summarize what I've learned so far and continue.",
+                    ))
+                    continue
+                
                 # Execute tools
                 tool_results = await self._execute_tools(state, response.tool_calls)
                 
@@ -171,6 +183,17 @@ class AgentLoop:
                         content=result.output if result.success else f"Error: {result.error}",
                         tool_call_id=result.tool_call_id,
                     ))
+                
+                # Phase 0.5: Check workflow discipline with judge
+                if self.judge:
+                    judgment = self.judge.check_workflow_discipline(state.execution.steps)
+                    if not judgment.passed and judgment.suggestion:
+                        logger.info(f"Judge guidance: {judgment.suggestion}")
+                        # Add judge guidance to conversation to guide next step
+                        state.conversation.add_message(Message(
+                            role=MessageRole.SYSTEM,
+                            content=f"⚠️ Workflow guidance: {judgment.suggestion}",
+                        ))
                 
                 # Continue loop to get final answer
                 continue
@@ -212,6 +235,9 @@ class AgentLoop:
         for tool_call in tool_calls:
             logger.info(f"Executing tool: {tool_call.name}")
             
+            # Phase 0.5: Record tool use for budget tracking
+            state.execution.record_tool_use()
+            
             # Validate with rule engine
             is_allowed, violations = self.rule_engine.evaluate(tool_call)
             
@@ -249,6 +275,12 @@ class AgentLoop:
                     content=result.output if result.success else result.error,
                     tool_results=[result],
                 ))
+                
+                # Phase 0.5: Judge tool result quality
+                if self.judge:
+                    judgment = self.judge.check_tool_result(result)
+                    if not judgment.passed:
+                        logger.warning(f"Tool result issue: {judgment.reason}")
                 
                 results.append(result)
             

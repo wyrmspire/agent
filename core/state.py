@@ -84,6 +84,8 @@ class ExecutionContext:
         available_tools: Tools available for this execution
         current_step: Current step number
         max_steps: Maximum steps allowed
+        max_tools_per_step: Maximum tools allowed per step (Phase 0.5)
+        tools_used_this_step: Count of tools used in current step (Phase 0.5)
         steps: History of steps taken
         started_at: When execution started
         metadata: Optional execution metadata
@@ -93,6 +95,8 @@ class ExecutionContext:
     available_tools: List[Tool] = field(default_factory=list)
     current_step: int = 0
     max_steps: int = 20
+    max_tools_per_step: int = 10  # Phase 0.5: Tool budget enforcement
+    tools_used_this_step: int = 0
     steps: List[Step] = field(default_factory=list)
     started_at: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -101,10 +105,20 @@ class ExecutionContext:
         """Add a step to execution history."""
         self.steps.append(step)
         self.current_step += 1
+        # Reset tool counter for new step
+        self.tools_used_this_step = 0
     
     def should_continue(self) -> bool:
         """Check if execution should continue."""
         return self.current_step < self.max_steps
+    
+    def can_use_tool(self) -> bool:
+        """Check if more tools can be used in current step (Phase 0.5)."""
+        return self.tools_used_this_step < self.max_tools_per_step
+    
+    def record_tool_use(self) -> None:
+        """Record that a tool was used in current step (Phase 0.5)."""
+        self.tools_used_this_step += 1
     
     def get_tool_by_name(self, name: str) -> Optional[Tool]:
         """Get a tool by name."""
