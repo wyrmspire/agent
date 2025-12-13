@@ -285,3 +285,105 @@ class AgentJudge:
             passed=True,
             reason="Workflow discipline looks good",
         )
+    
+    def check_patch_discipline(self, steps: List[Step]) -> Judgment:
+        """Check if agent followed patch protocol for project changes (Phase 0.7).
+        
+        Detects patch protocol violations:
+        - Proposing changes without creating a patch
+        - Writing to project files directly (outside workspace)
+        - Not explaining why tests weren't run when budget prevented them
+        
+        Args:
+            steps: Execution steps so far
+            
+        Returns:
+            Judgment with actionable guidance
+        """
+        if len(steps) == 0:
+            return Judgment(passed=True, reason="No steps yet")
+        
+        # Check: Did agent propose changes without creating a patch?
+        proposes_change = False
+        has_create_patch = False
+        
+        # Keywords that indicate proposing changes
+        propose_keywords = [
+            "fix for", "change to", "modify", "update", "patch for",
+            "i will fix", "i'll fix", "i can fix", "let me fix",
+            "i've fixed", "i have fixed", "fixed the",
+        ]
+        
+        for step in steps:
+            # Check content for change proposals
+            if step.content:
+                content_lower = step.content.lower()
+                if any(keyword in content_lower for keyword in propose_keywords):
+                    proposes_change = True
+            
+            # Check if patch was created
+            if step.tool_calls:
+                for tc in step.tool_calls:
+                    if tc.name == "create_patch":
+                        has_create_patch = True
+        
+        if proposes_change and not has_create_patch:
+            return Judgment(
+                passed=False,
+                reason="Proposed changes without creating a patch",
+                severity="warning",
+                suggestion="DO THIS NEXT: Use create_patch tool to propose changes via patch protocol.",
+            )
+        
+        # Check: Did agent try to write to project files directly?
+        write_tools = ["write_file"]
+        project_file_writes = []
+        
+        for step in steps:
+            if step.tool_calls:
+                for tc in step.tool_calls:
+                    if tc.name in write_tools:
+                        # Check if target is outside workspace
+                        path = tc.arguments.get("path", "") or tc.arguments.get("file_path", "")
+                        if path and not path.startswith("workspace/") and not path.startswith("./workspace/"):
+                            # Allow writing to tmp files
+                            if not path.startswith("/tmp/") and not path.startswith("tmp/"):
+                                project_file_writes.append(path)
+        
+        if project_file_writes:
+            return Judgment(
+                passed=False,
+                reason=f"Attempted to write project files directly: {project_file_writes[0]}",
+                severity="error",
+                suggestion="DO THIS NEXT: Use create_patch tool instead. Never edit project files directly.",
+            )
+        
+        # Check: Tool budget prevented tests, did agent ask for tests next step?
+        hit_tool_budget = False
+        asked_for_tests = False
+        
+        for step in steps[-5:]:  # Check last 5 steps
+            # Check for budget exhaustion content (must mention exhaustion/exceeded/prevented)
+            if step.content:
+                content_lower = step.content.lower()
+                if "tool budget" in content_lower and any(word in content_lower for word in ["exhaust", "exceed", "prevent", "limit", "cannot"]):
+                    hit_tool_budget = True
+            
+            # Check if agent mentioned running tests next
+            if step.content:
+                content_lower = step.content.lower()
+                if any(phrase in content_lower for phrase in ["test next", "run tests next", "need to test", "should test"]):
+                    asked_for_tests = True
+        
+        if hit_tool_budget and not asked_for_tests:
+            return Judgment(
+                passed=False,
+                reason="Tool budget prevented tests, but agent didn't schedule tests for next step",
+                severity="warning",
+                suggestion="DO THIS NEXT: Explain that tests should be run in the next step after budget resets.",
+            )
+        
+        return Judgment(
+            passed=True,
+            reason="Patch discipline looks good",
+        )

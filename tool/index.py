@@ -127,6 +127,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     from .pyexe import PythonReplTool
     from .memory import MemoryTool
     from .chunk_search import ChunkSearchTool
+    from .patch import CreatePatchTool, ListPatchesTool, GetPatchTool
     
     # Default to all enabled if no config provided
     if config is None:
@@ -138,6 +139,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             "enable_pyexe": True,
             "enable_memory": True,
             "enable_chunk_search": True,
+            "enable_patch": True,
         }
     
     registry = ToolRegistry()
@@ -170,6 +172,12 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     # Chunk search tool (Phase 0.6)
     if config.get("enable_chunk_search", True):
         registry.register(ChunkSearchTool())
+    
+    # Patch tools (Phase 0.7)
+    if config.get("enable_patch", True):
+        registry.register(CreatePatchTool())
+        registry.register(ListPatchesTool())
+        registry.register(GetPatchTool())
     
     # Skill management tool (Phase 0.4)
     if config.get("enable_promote_skill", True):
