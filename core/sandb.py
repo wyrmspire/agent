@@ -191,14 +191,14 @@ class Workspace:
             resolved.relative_to(self.root)
         except ValueError:
             raise WorkspaceError(
-                f"Path '{path}' is outside workspace (must be within {self.root})"
+                f"[blocked_by: workspace] Path '{path}' is outside workspace (must be within {self.root})"
             )
         
         # Workspace paths don't need blocked dir checks (they're already in workspace)
         # But check if path is a blocked file
         if resolved in self.blocked_files:
             raise WorkspaceError(
-                f"Access to '{resolved.name}' is blocked for safety"
+                f"[blocked_by: workspace] Access to '{resolved.name}' is blocked for safety"
             )
         
         return resolved
@@ -240,19 +240,19 @@ class Workspace:
             resolved.relative_to(self._project_root)
         except ValueError:
             raise WorkspaceError(
-                f"Path '{path}' is outside project (must be within {self._project_root})"
+                f"[blocked_by: workspace] Path '{path}' is outside project (must be within {self._project_root})"
             )
         
         # Check if path is a blocked file
         if resolved in self.blocked_files:
             raise WorkspaceError(
-                f"Access to '{resolved.name}' is blocked for safety"
+                f"[blocked_by: workspace] Access to '{resolved.name}' is blocked for safety"
             )
         
         # Check if path matches sensitive patterns
         if self._is_sensitive_file(resolved):
             raise WorkspaceError(
-                f"Access to '{resolved.name}' is blocked (sensitive file)"
+                f"[blocked_by: workspace] Access to '{resolved.name}' is blocked (sensitive file)"
             )
         
         # Verify file exists for read operations

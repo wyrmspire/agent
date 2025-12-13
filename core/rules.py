@@ -47,10 +47,12 @@ class RuleViolation:
         rule_name: Name of the rule that was violated
         reason: Why the rule was violated
         severity: Severity level (info, warning, error, critical)
+        blocked_by: Source of blocking ("rules" for RuleEngine, "workspace" for sandbox)
     """
     rule_name: str
     reason: str
     severity: str = "error"
+    blocked_by: str = "rules"
 
 
 class Rule(ABC):

@@ -301,7 +301,7 @@ class AgentLoop:
                 results.append(ToolResult(
                     tool_call_id=tool_call.id,
                     output="",
-                    error=f"Tool call blocked: {violations[0].reason}",
+                    error=f"Tool call blocked: {violations[0].reason} [blocked_by: {violations[0].blocked_by}]",
                     success=False,
                 ))
                 continue
