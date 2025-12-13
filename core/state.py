@@ -18,8 +18,33 @@ Rules:
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from datetime import datetime
+import uuid
+import time
 
 from .types import Message, Tool, Step, ToolCall, ToolResult
+
+
+def generate_run_id() -> str:
+    """Generate a unique run ID for traceability.
+    
+    Format: run_{timestamp}_{uuid_short}
+    This allows grep-ing logs by run_id to trace execution.
+    
+    Returns:
+        Unique run identifier
+    """
+    timestamp = int(time.time())
+    short_uuid = str(uuid.uuid4())[:8]
+    return f"run_{timestamp}_{short_uuid}"
+
+
+def generate_conversation_id() -> str:
+    """Generate a unique conversation ID.
+    
+    Returns:
+        Unique conversation identifier
+    """
+    return f"conv_{uuid.uuid4().hex}"
 
 
 @dataclass
@@ -54,12 +79,13 @@ class ExecutionContext:
     """Context for a single agent execution run.
     
     Attributes:
-        run_id: Unique identifier for this execution
+        run_id: Unique identifier for this execution (for traceability)
         conversation_id: ID of the conversation this belongs to
         available_tools: Tools available for this execution
         current_step: Current step number
         max_steps: Maximum steps allowed
         steps: History of steps taken
+        started_at: When execution started
         metadata: Optional execution metadata
     """
     run_id: str
@@ -68,6 +94,7 @@ class ExecutionContext:
     current_step: int = 0
     max_steps: int = 20
     steps: List[Step] = field(default_factory=list)
+    started_at: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def add_step(self, step: Step) -> None:
