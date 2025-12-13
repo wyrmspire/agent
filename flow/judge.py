@@ -54,8 +54,6 @@ class AgentJudge:
     
     def __init__(self):
         self.seen_tool_calls = set()
-        self.last_write_step = -1  # Track when code was last written
-        self.shell_error_count = 0  # Track repeated shell errors
     
     def check_progress(self, steps: List[Step]) -> Judgment:
         """Check if agent is making progress.

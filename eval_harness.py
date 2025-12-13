@@ -111,16 +111,20 @@ class EvalHarness:
                 description="List files then read one",
                 user_message="List all Python files in the current directory, then read the first one you find",
                 success_criteria=lambda result, workspace: 
-                    "list_files" in str(result) and "read_file" in str(result),
+                    # Check if result contains tool usage info (when integrated)
+                    result.get("tools_used", []) and 
+                    any("list" in t.lower() for t in result.get("tools_used", [])),
                 expect_tests=False,
             ),
             TaskDefinition(
                 name="create_python_function",
                 description="Create a Python function and test it",
                 user_message="Create a Python file called math_utils.py with a function that adds two numbers. Then write a test for it and run the test.",
-                success_criteria=lambda result, workspace:
+                success_criteria=lambda result, workspace: (
                     (workspace / "math_utils.py").exists() and
-                    "def " in (workspace / "math_utils.py").read_text(),
+                    (workspace / "math_utils.py").is_file() and
+                    "def " in (workspace / "math_utils.py").read_text()
+                ) if (workspace / "math_utils.py").exists() else False,
                 expect_tests=True,
             ),
             TaskDefinition(
@@ -163,8 +167,9 @@ class EvalHarness:
             success = False
             
             # Try to check success criteria
+            # Note: Passing empty result dict as placeholder since real agent integration pending
             try:
-                success = task.success_criteria(None, self.workspace_dir)
+                success = task.success_criteria({}, self.workspace_dir)
             except Exception as e:
                 logger.debug(f"Success criteria check failed: {e}")
                 success = False
