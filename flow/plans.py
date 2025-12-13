@@ -15,11 +15,14 @@ Rules:
 - Explain when to use vs not use tools
 """
 
-from typing import List
+from typing import List, Optional, Dict, Any
 from core.types import Message, MessageRole, Tool
 
 
-def create_system_prompt(tools: List[Tool]) -> str:
+def create_system_prompt(
+    tools: List[Tool],
+    project_context: Optional[Dict[str, Any]] = None,
+) -> str:
     """Create system prompt for tool-using agent.
     
     This prompt instructs the model on:
@@ -67,6 +70,45 @@ IMPORTANT:
         for tool in tools:
             tools_section += f"- {tool.name}: {tool.description}\n"
         base_prompt += tools_section
+    
+    # Add project context if available
+    if project_context:
+        project_section = f"""
+
+PROJECT CONTEXT:
+You are working on a project. Consult the Plan and Lab Notebook below for context.
+
+Project: {project_context.get('name', 'Unknown')}
+State: {project_context.get('state', 'Unknown')}
+Description: {project_context.get('description', 'No description')}
+
+Current Tasks:
+"""
+        tasks = project_context.get('tasks', [])
+        if tasks:
+            for task in tasks:
+                status = task.get('status', 'pending')
+                desc = task.get('description', '')
+                project_section += f"- [{status}] {desc}\n"
+        else:
+            project_section += "- No tasks defined\n"
+        
+        # Add recent lab notebook entries
+        recent_notes = project_context.get('recent_notes', [])
+        if recent_notes:
+            project_section += "\nRecent Lab Notebook Entries:\n"
+            for note in recent_notes[-5:]:  # Last 5 entries
+                project_section += f"  {note}\n"
+        
+        project_section += """
+When working on tasks:
+1. Check the current project state and tasks
+2. Reference the Lab Notebook for previous findings
+3. Update task status as you make progress
+4. Add observations to the Lab Notebook
+"""
+        
+        base_prompt += project_section
     
     return base_prompt
 

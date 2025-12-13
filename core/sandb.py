@@ -89,6 +89,11 @@ class Workspace:
             project_root / "requirements.txt",
         ]
     
+    @property
+    def base_path(self) -> Path:
+        """Get the base path of the workspace (alias for root)."""
+        return self.root
+    
     def resolve(self, path: Union[str, Path]) -> Path:
         """Resolve a path within the workspace.
         

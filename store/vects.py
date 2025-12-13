@@ -8,6 +8,7 @@ Responsibilities:
 - Store text embeddings
 - Semantic search via cosine similarity
 - Document retrieval with citations
+- Persistence to disk
 
 Rules:
 - Returns citations + snippets
@@ -16,20 +17,37 @@ Rules:
 """
 
 import numpy as np
+import pickle
+import json
+from pathlib import Path
 from typing import List, Dict, Any, Optional
+import logging
 
 from .bases import VectorStore, DocumentStore
 
+logger = logging.getLogger(__name__)
+
 
 class SimpleVectorStore(VectorStore):
-    """Simple in-memory vector store.
+    """Simple in-memory vector store with disk persistence.
     
     Uses cosine similarity for search.
     Good for development and small datasets.
+    Supports saving/loading embeddings to/from disk.
     """
     
-    def __init__(self):
+    def __init__(self, persist_path: Optional[str] = None):
+        """Initialize vector store.
+        
+        Args:
+            persist_path: Optional path to persist embeddings
+        """
         self.documents: Dict[str, Dict[str, Any]] = {}
+        self.persist_path = Path(persist_path) if persist_path else None
+        
+        # Load from disk if file exists
+        if self.persist_path and self.persist_path.exists():
+            self.load()
     
     async def add(
         self,
@@ -93,6 +111,82 @@ class SimpleVectorStore(VectorStore):
     def count(self) -> int:
         """Get document count."""
         return len(self.documents)
+    
+    def save(self, path: Optional[str] = None) -> bool:
+        """Save embeddings to disk.
+        
+        Args:
+            path: Optional custom path (overrides persist_path)
+            
+        Returns:
+            True if saved successfully
+        """
+        save_path = Path(path) if path else self.persist_path
+        
+        if not save_path:
+            logger.warning("No persist_path configured, cannot save")
+            return False
+        
+        try:
+            # Ensure directory exists
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Prepare data for serialization
+            data = {}
+            for doc_id, doc in self.documents.items():
+                data[doc_id] = {
+                    "id": doc["id"],
+                    "text": doc["text"],
+                    "embedding": doc["embedding"].tolist(),  # Convert numpy to list
+                    "metadata": doc["metadata"],
+                }
+            
+            # Save as pickle for efficiency
+            with open(save_path, 'wb') as f:
+                pickle.dump(data, f)
+            
+            logger.info(f"Saved {len(self.documents)} embeddings to {save_path}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Failed to save embeddings: {e}")
+            return False
+    
+    def load(self, path: Optional[str] = None) -> bool:
+        """Load embeddings from disk.
+        
+        Args:
+            path: Optional custom path (overrides persist_path)
+            
+        Returns:
+            True if loaded successfully
+        """
+        load_path = Path(path) if path else self.persist_path
+        
+        if not load_path or not load_path.exists():
+            logger.warning(f"File not found: {load_path}")
+            return False
+        
+        try:
+            with open(load_path, 'rb') as f:
+                data = pickle.load(f)
+            
+            # Restore documents with numpy arrays
+            self.documents.clear()
+            for doc_id, doc_data in data.items():
+                self.documents[doc_id] = {
+                    "id": doc_data["id"],
+                    "text": doc_data["text"],
+                    "embedding": np.array(doc_data["embedding"]),  # Convert list to numpy
+                    "metadata": doc_data["metadata"],
+                }
+            
+            logger.info(f"Loaded {len(self.documents)} embeddings from {load_path}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Failed to load embeddings: {e}")
+            return False
 
 
 class SimpleDocumentStore(DocumentStore):
