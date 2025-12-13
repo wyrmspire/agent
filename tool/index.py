@@ -126,6 +126,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     from .dview import DataViewTool
     from .pyexe import PythonReplTool
     from .memory import MemoryTool
+    from .chunk_search import ChunkSearchTool
     
     # Default to all enabled if no config provided
     if config is None:
@@ -136,6 +137,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             "enable_data_view": True,
             "enable_pyexe": True,
             "enable_memory": True,
+            "enable_chunk_search": True,
         }
     
     registry = ToolRegistry()
@@ -164,6 +166,10 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     # Memory tool (Phase 0.3)
     if config.get("enable_memory", True):
         registry.register(MemoryTool())
+    
+    # Chunk search tool (Phase 0.6)
+    if config.get("enable_chunk_search", True):
+        registry.register(ChunkSearchTool())
     
     # Skill management tool (Phase 0.4)
     if config.get("enable_promote_skill", True):
