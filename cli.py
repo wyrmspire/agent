@@ -13,8 +13,14 @@ This will start an interactive chat session. Type 'quit' or 'exit' to stop.
 
 import asyncio
 import sys
+import os
 import uuid
 from pathlib import Path
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -35,7 +41,7 @@ async def main():
     setup_logging()
     config = load_config()
     
-    print("🤖 Agent CLI - Day 1 Demo")
+    print("[Agent CLI]")
     print("=" * 50)
     print(f"Model: {config['model']}")
     print(f"URL: {config['model_url']}")
@@ -52,7 +58,7 @@ async def main():
     # Create components
     try:
         if args.mock:
-            print("🎭 Using MOCK Gateway (no real model connection)")
+            print("[MOCK] Using MOCK Gateway (no real model connection)")
             from gate.mock import MockGateway
             gateway = MockGateway()
         else:
@@ -65,24 +71,24 @@ async def main():
             print("Checking model gateway...")
             healthy = await gateway.health_check()
             if not healthy:
-                print(f"❌ Cannot connect to model gateway at {config['model_url']}")
+                print(f"[ERROR] Cannot connect to model gateway at {config['model_url']}")
                 print(f"   Make sure the model server is running")
                 print("   And a model is loaded")
                 return 1
             
-            print("✅ Connected to model gateway\n")
+            print("[OK] Connected to model gateway\n")
         
     except Exception as e:
-        print(f"❌ Error connecting to gateway: {e}")
+        print(f"[ERROR] Error connecting to gateway: {e}")
         return 1
     
     # Create tool registry
     tools = create_default_registry(config)
-    print(f"✅ Loaded {tools.count} tools: {', '.join(tools.list())}\n")
+    print(f"[OK] Loaded {tools.count} tools: {', '.join(tools.list())}\n")
     
     # Create rule engine
     rules = get_default_engine()
-    print("✅ Loaded safety rules\n")
+    print("[OK] Loaded safety rules\n")
     
     # Create agent loop
     loop = AgentLoop(
@@ -124,7 +130,7 @@ async def main():
                 continue
             
             if user_input.lower() in ["quit", "exit", "bye"]:
-                print("\n👋 Goodbye!")
+                print("\nGoodbye!")
                 break
             
             # Run agent
@@ -147,10 +153,10 @@ async def main():
             )
         
         except KeyboardInterrupt:
-            print("\n\n👋 Goodbye!")
+            print("\n\nGoodbye!")
             break
         except Exception as e:
-            print(f"\n\n❌ Error: {e}")
+            print(f"\n\n[ERROR] {e}")
             import traceback
             traceback.print_exc()
     

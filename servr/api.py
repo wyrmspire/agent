@@ -106,7 +106,7 @@ class ModelEngine:
         logger.info(f"Initializing model engine with path: {self.model_path}")
         
     def load(self):
-        """Load the model (real loading)."""
+        """Load the model with optimized settings."""
         logger.info(f"Loading model from {self.model_path}...")
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -114,17 +114,41 @@ class ModelEngine:
                 trust_remote_code=True
             )
             
+            # Optimized 4-bit quantization with NF4 for better quality
             quantization_config = BitsAndBytesConfig(
                 load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16
+                bnb_4bit_quant_type="nf4",  # NF4 is better than FP4 for quality
+                bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is faster if supported
+                bnb_4bit_use_double_quant=True,  # Double quantization saves memory
             )
+            
+            # Check GPU memory and set allocation
+            if torch.cuda.is_available():
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                # Use 85% of GPU + allow CPU offload for larger context
+                max_memory = {0: f"{int(gpu_mem * 0.85)}GiB", "cpu": "8GiB"}
+                logger.info(f"GPU memory: {gpu_mem:.1f}GB, allocating: {max_memory}")
+            else:
+                max_memory = None
+            
+            # Try to use Flash Attention 2 if available
+            attn_implementation = "eager"  # Default
+            try:
+                import flash_attn
+                attn_implementation = "flash_attention_2"
+                logger.info("Flash Attention 2 enabled for faster inference")
+            except ImportError:
+                logger.info("Flash Attention 2 not available, using default attention")
             
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 device_map="auto",
-                torch_dtype=torch.float16,
+                max_memory=max_memory,
+                torch_dtype=torch.bfloat16,
                 quantization_config=quantization_config,
                 low_cpu_mem_usage=True,
+                attn_implementation=attn_implementation,
+                use_cache=True,  # Enable KV cache for faster generation
             )
             self.ready = True
             logger.info("Model loaded successfully")
@@ -238,9 +262,14 @@ class ModelEngine:
     def _parse_legacy_format(self, text: str) -> List[Dict[str, Any]]:
         """Legacy parser for backward compatibility.
         
-        Supports simple patterns like:
-        - list_files <path>
+        Supports patterns like:
+        - list_files <path>           (space-separated)
+        - list_files("path")          (Python function call)
         - fetch <url>
+        - fetch("url")
+        - shell("cmd")
+        - read_file("path")
+        - write_file("path", "content")
         
         Args:
             text: Response text
@@ -248,14 +277,18 @@ class ModelEngine:
         Returns:
             List of tool calls
         """
-        import shlex
         tool_calls = []
         
-        # Check for list_files
-        ls_match = re.search(r"list_files\s+([^\s\n]+)", text)
+        # Pattern for Python-style function calls: tool_name("arg") or tool_name('arg')
+        # This catches: list_files("."), fetch("https://..."), shell("ls"), etc.
+        
+        # list_files - space or function style
+        ls_match = re.search(r'list_files\s*\(\s*["\']([^"\']+)["\']\s*\)', text)
+        if not ls_match:
+            ls_match = re.search(r"list_files\s+([^\s\n\)]+)", text)
         if ls_match:
             tool_calls.append({
-                "id": f"call_ls_{int(time.time())}",
+                "id": f"call_ls_{int(time.time() * 1000)}",
                 "type": "function",
                 "function": {
                     "name": "list_files",
@@ -263,15 +296,41 @@ class ModelEngine:
                 }
             })
         
-        # Check for fetch
-        fetch_match = re.search(r"fetch\s+(https?://[^\s\n]+)", text)
+        # read_file - function style
+        read_match = re.search(r'read_file\s*\(\s*["\']([^"\']+)["\']\s*\)', text)
+        if read_match:
+            tool_calls.append({
+                "id": f"call_read_{int(time.time() * 1000)}",
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "arguments": json.dumps({"path": read_match.group(1)})
+                }
+            })
+        
+        # fetch - space or function style
+        fetch_match = re.search(r'fetch\s*\(\s*["\']([^"\']+)["\']\s*\)', text)
+        if not fetch_match:
+            fetch_match = re.search(r"fetch\s+(https?://[^\s\n\)]+)", text)
         if fetch_match:
             tool_calls.append({
-                "id": f"call_fetch_{int(time.time())}",
+                "id": f"call_fetch_{int(time.time() * 1000)}",
                 "type": "function",
                 "function": {
                     "name": "fetch",
                     "arguments": json.dumps({"url": fetch_match.group(1)})
+                }
+            })
+        
+        # shell - function style
+        shell_match = re.search(r'shell\s*\(\s*["\']([^"\']+)["\']\s*\)', text)
+        if shell_match:
+            tool_calls.append({
+                "id": f"call_shell_{int(time.time() * 1000)}",
+                "type": "function",
+                "function": {
+                    "name": "shell",
+                    "arguments": json.dumps({"cmd": shell_match.group(1)})
                 }
             })
         

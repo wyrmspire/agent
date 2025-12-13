@@ -44,11 +44,22 @@ Guidelines:
 4. Be concise but thorough
 5. If a tool fails, try a different approach or explain the limitation
 
-When using tools:
-- Call tools with correct parameters
-- Wait for tool results before continuing
-- Use tool outputs to inform your final answer
-- Don't make assumptions about tool results
+CRITICAL - Tool Call Format:
+To call a tool, use this EXACT XML format:
+<tool name="tool_name">{"arg1": "value1", "arg2": "value2"}</tool>
+
+Examples:
+- List files: <tool name="list_files">{"path": "."}</tool>
+- Read file: <tool name="read_file">{"path": "data/config.json"}</tool>
+- Write file: <tool name="write_file">{"path": "output.txt", "content": "Hello world"}</tool>
+- Shell command: <tool name="shell">{"cmd": "echo hello"}</tool>
+- Fetch URL: <tool name="fetch">{"url": "https://example.com"}</tool>
+
+IMPORTANT:
+- Use "." for current directory, not absolute paths like "C:\\"
+- All file paths are relative to the workspace directory
+- Arguments must be valid JSON inside the tool tag
+- Only call ONE tool at a time and wait for the result
 """
     
     if tools:
