@@ -43,26 +43,37 @@ async def main():
     print("=" * 50)
     print("\nType 'quit' or 'exit' to stop\n")
     
+    # Parse args
+    import argparse
+    parser = argparse.ArgumentParser(description="Agent CLI")
+    parser.add_argument("--mock", action="store_true", help="Use mock model instead of real server")
+    args = parser.parse_args()
+
     # Create components
     try:
-        gateway = LMStudioGateway(
-            base_url=config["model_url"],
-            model=config["model"],
-        )
-        
-        # Health check
-        print("Checking model gateway...")
-        healthy = await gateway.health_check()
-        if not healthy:
-            print(f"❌ Cannot connect to model gateway at {config['model_url']}")
-            print(f"   Make sure the model server is running")
-            print("   And a model is loaded")
-            return 1
-        
-        print("✅ Connected to model gateway\n")
+        if args.mock:
+            print("🎭 Using MOCK Gateway (no real model connection)")
+            from gate.mock import MockGateway
+            gateway = MockGateway()
+        else:
+            gateway = LMStudioGateway(
+                base_url=config["model_url"],
+                model=config["model"],
+            )
+            
+            # Health check
+            print("Checking model gateway...")
+            healthy = await gateway.health_check()
+            if not healthy:
+                print(f"❌ Cannot connect to model gateway at {config['model_url']}")
+                print(f"   Make sure the model server is running")
+                print("   And a model is loaded")
+                return 1
+            
+            print("✅ Connected to model gateway\n")
         
     except Exception as e:
-        print(f"❌ Error connecting to LM Studio: {e}")
+        print(f"❌ Error connecting to gateway: {e}")
         return 1
     
     # Create tool registry

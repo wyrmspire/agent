@@ -192,6 +192,28 @@ class ModelEngine:
                 }
             })
             
+        # Check for start_script (custom tool if needed) or just shell
+        
+        # Check for shell
+        # Matches: shell "command"
+        if "shell" in response_text:
+            try:
+                for line in response_text.splitlines():
+                    if line.strip().startswith("shell"):
+                        parts = shlex.split(line.strip())
+                        if len(parts) >= 2:
+                            cmd = parts[1]
+                            tool_calls.append({
+                                "id": f"call_shell_{int(time.time())}",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": json.dumps({"cmd": cmd})
+                                }
+                            })
+            except Exception as e:
+                logger.warning(f"Failed to parse shell: {e}")
+
         # Check for write_file (naive quote parsing)
         # Matches: write_file path "content" OR write_file path 'content'
         if "write_file" in response_text:
