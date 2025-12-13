@@ -169,6 +169,14 @@ class CreatePatchTool(BaseTool):
             # Generate apply command
             apply_cmd = self.patch_manager.generate_apply_command(patch.patch_id)
             
+            # Important message constant
+            PATCH_APPLY_WARNING = (
+                "IMPORTANT: You CANNOT claim this is 'fixed' until:\n"
+                "1. Human applies the patch\n"
+                "2. Tests run successfully\n"
+                "3. You verify the results\n"
+            )
+            
             # Format output
             output = f"✓ Created patch: {patch.patch_id}\n\n"
             output += f"Title: {patch.title}\n"
@@ -180,10 +188,7 @@ class CreatePatchTool(BaseTool):
             output += f"- Tests: {patch.tests_file}\n\n"
             output += f"TO APPLY (human action required):\n"
             output += f"  {apply_cmd}\n\n"
-            output += f"IMPORTANT: You CANNOT claim this is 'fixed' until:\n"
-            output += f"1. Human applies the patch\n"
-            output += f"2. Tests run successfully\n"
-            output += f"3. You verify the results\n"
+            output += PATCH_APPLY_WARNING
             
             return ToolResult(
                 tool_call_id="",

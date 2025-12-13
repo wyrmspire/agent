@@ -50,17 +50,21 @@ class ChunkManager:
     for efficient lookup and citation.
     """
     
-    # Sensitive patterns to exclude
+    # Sensitive patterns to exclude (case-insensitive)
     SENSITIVE_PATTERNS = [
         r"\.env",
         r"\.ssh",
         r"\.git/",
         r"\.github/agents/",
         r"password",
+        r"passwd",
         r"secret",
         r"token",
         r"key",
+        r"api[_-]?key",
+        r"auth[_-]?token",
         r"credentials",
+        r"private[_-]?key",
         r"__pycache__",
         r"\.pyc$",
     ]
@@ -140,8 +144,10 @@ class ChunkManager:
         
         for i, line in enumerate(lines, start=1):
             # Detect function or class definition
+            # Function pattern handles type hints: def func(x: int) -> str:
             match_func = re.match(r"^(\s*)def\s+(\w+)\s*\(", line)
-            match_class = re.match(r"^(\s*)class\s+(\w+)", line)
+            # Class pattern handles inheritance: class Child(Parent):
+            match_class = re.match(r"^(\s*)class\s+(\w+)(?:\(|:)", line)
             
             if match_func:
                 # Save previous chunk if exists

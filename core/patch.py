@@ -256,9 +256,14 @@ class PatchManager:
         if not diff_content.strip():
             return False, "Diff file is empty"
         
-        # Check diff is valid unified diff format
-        if not diff_content.startswith("---") and not diff_content.startswith("diff"):
-            return False, "Invalid diff format (must be unified diff)"
+        # Check diff is valid unified diff format (allow various formats)
+        # Valid diffs can start with: ---, diff, Index:, or have no header
+        valid_starts = ["---", "diff", "index:", "@@"]
+        has_valid_start = any(diff_content.lower().startswith(start) for start in valid_starts)
+        has_diff_markers = "@@" in diff_content or "---" in diff_content
+        
+        if not has_valid_start and not has_diff_markers:
+            return False, "Invalid diff format (must be unified diff with --- or @@ markers)"
         
         return True, None
     
