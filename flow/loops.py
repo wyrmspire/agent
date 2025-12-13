@@ -169,7 +169,7 @@ class AgentLoop:
                     state.conversation.add_message(Message(
                         role=MessageRole.TOOL,
                         content=result.output if result.success else f"Error: {result.error}",
-                        name=result.tool_call_id,
+                        tool_call_id=result.tool_call_id,
                     ))
                 
                 # Continue loop to get final answer

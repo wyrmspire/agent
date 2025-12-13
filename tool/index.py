@@ -16,7 +16,7 @@ Rules:
 - Thread-safe operations
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from core.types import Tool
 from .bases import BaseTool
@@ -111,9 +111,12 @@ class ToolRegistry:
         return len(self._tools)
 
 
-def create_default_registry() -> ToolRegistry:
+def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegistry:
     """Create a registry with default tools.
     
+    Args:
+        config: Configuration dictionary to toggle tools
+        
     Returns:
         ToolRegistry with common tools registered
     """
@@ -121,17 +124,28 @@ def create_default_registry() -> ToolRegistry:
     from .shell import ShellTool
     from .fetch import FetchTool
     
+    # Default to all enabled if no config provided
+    if config is None:
+        config = {
+            "enable_files": True,
+            "enable_shell": True,
+            "enable_fetch": True,
+        }
+    
     registry = ToolRegistry()
     
     # File tools
-    registry.register(ListFiles())
-    registry.register(ReadFile())
-    registry.register(WriteFile())
+    if config.get("enable_files", True):
+        registry.register(ListFiles())
+        registry.register(ReadFile())
+        registry.register(WriteFile())
     
     # Shell tool
-    registry.register(ShellTool())
+    if config.get("enable_shell", True):
+        registry.register(ShellTool())
     
     # HTTP tool
-    registry.register(FetchTool())
+    if config.get("enable_fetch", True):
+        registry.register(FetchTool())
     
     return registry

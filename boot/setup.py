@@ -69,11 +69,11 @@ def load_config() -> Dict[str, Any]:
         # Server config
         "host": os.getenv("AGENT_HOST", "0.0.0.0"),
         "port": int(os.getenv("AGENT_PORT", "8000")),
-        "enable_http": os.getenv("AGENT_ENABLE_HTTP", "true").lower() == "true",
+        "enable_http": os.getenv("AGENT_ENABLE_HTTP", "false").lower() == "true",
         
         # Model config
         "model": os.getenv("AGENT_MODEL", "qwen2.5-coder"),
-        "model_url": os.getenv("AGENT_MODEL_URL", "http://localhost:1234"),
+        "model_url": os.getenv("AGENT_MODEL_URL", "http://localhost:1234/v1"),
         "model_api_key": os.getenv("AGENT_MODEL_API_KEY", ""),
         
         # Agent config

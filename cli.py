@@ -51,22 +51,22 @@ async def main():
         )
         
         # Health check
-        print("Checking LM Studio connection...")
+        print("Checking model gateway...")
         healthy = await gateway.health_check()
         if not healthy:
-            print("❌ Cannot connect to LM Studio")
-            print(f"   Make sure LM Studio is running at {config['model_url']}")
+            print(f"❌ Cannot connect to model gateway at {config['model_url']}")
+            print(f"   Make sure the model server is running")
             print("   And a model is loaded")
             return 1
         
-        print("✅ Connected to LM Studio\n")
+        print("✅ Connected to model gateway\n")
         
     except Exception as e:
         print(f"❌ Error connecting to LM Studio: {e}")
         return 1
     
     # Create tool registry
-    tools = create_default_registry()
+    tools = create_default_registry(config)
     print(f"✅ Loaded {tools.count} tools: {', '.join(tools.list())}\n")
     
     # Create rule engine

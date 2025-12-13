@@ -54,3 +54,10 @@ htmlcov/
 # Temporary
 tmp/
 temp/
+
+# Node/Web
+node_modules/
+.next/
+
+# Agent Output
+dump*.md

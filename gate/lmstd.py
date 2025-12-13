@@ -55,6 +55,9 @@ class LMStudioGateway(ModelGateway):
         
         if message.tool_calls:
             msg_dict["tool_calls"] = message.tool_calls
+            
+        if message.tool_call_id:
+            msg_dict["tool_call_id"] = message.tool_call_id
         
         return msg_dict
     

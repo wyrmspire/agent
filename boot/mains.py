@@ -85,7 +85,6 @@ async def main() -> int:
     def handle_shutdown(sig, frame):
         print(f"\nReceived signal {sig}")
         loop.create_task(server.stop())
-        loop.stop()
     
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)

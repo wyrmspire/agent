@@ -53,6 +53,7 @@ class Message:
     content: str
     name: Optional[str] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
