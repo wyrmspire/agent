@@ -64,3 +64,6 @@ dump*.md
 
 # Workspace (Phase 0.2)
 workspace/
+
+# Eval Harness Output (Phase 0.5)
+eval_results.json

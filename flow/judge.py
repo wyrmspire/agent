@@ -222,8 +222,8 @@ class AgentJudge:
             if step.step_type == StepType.OBSERVE and has_write and i > write_step_idx:
                 if step.tool_results:
                     for result in step.tool_results:
-                        result_text = (result.output or "") + (result.error or "")
-                        if any(keyword in result_text.lower() 
+                        result_text = ((result.output or "") + (result.error or "")).lower()
+                        if any(keyword in result_text 
                                for keyword in ["test", "pytest", "unittest"]):
                             has_test_after_write = True
         

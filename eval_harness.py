@@ -121,10 +121,8 @@ class EvalHarness:
                 description="Create a Python function and test it",
                 user_message="Create a Python file called math_utils.py with a function that adds two numbers. Then write a test for it and run the test.",
                 success_criteria=lambda result, workspace: (
-                    (workspace / "math_utils.py").exists() and
-                    (workspace / "math_utils.py").is_file() and
-                    "def " in (workspace / "math_utils.py").read_text()
-                ) if (workspace / "math_utils.py").exists() else False,
+                    workspace / "math_utils.py"
+                ).exists() and "def " in (workspace / "math_utils.py").read_text(),
                 expect_tests=True,
             ),
             TaskDefinition(
@@ -167,7 +165,8 @@ class EvalHarness:
             success = False
             
             # Try to check success criteria
-            # Note: Passing empty result dict as placeholder since real agent integration pending
+            # Note: In real implementation, this would receive actual agent execution results
+            # Currently passing empty dict as placeholder - tasks check workspace files instead
             try:
                 success = task.success_criteria({}, self.workspace_dir)
             except Exception as e:
