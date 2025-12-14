@@ -26,17 +26,31 @@ class TestWorkspaceHygiene:
             assert bin_path.is_dir(), f"Bin {bin_name} should be a directory"
     
     def test_standard_bins_not_created_when_disabled(self, tmp_path):
-        """Standard bins are not created when disabled."""
-        ws = Workspace(tmp_path / "workspace", create_standard_bins=False)
+        """Standard bins are not created when disabled (Phase 1.6.1 hardening).
         
-        # Only workspace root should exist, not bins
+        This test is resilient to repeated runs or pre-existing directories.
+        """
+        ws_path = tmp_path / "workspace"
+        
+        # Record which bins exist BEFORE workspace init
+        bins_before = set()
+        if ws_path.exists():
+            bins_before = {item.name for item in ws_path.iterdir() 
+                          if item.is_dir() and item.name in Workspace.STANDARD_BINS}
+        
+        # Create workspace with bins disabled
+        ws = Workspace(ws_path, create_standard_bins=False)
+        
+        # Workspace root should exist
         assert ws.root.exists()
         
-        # Bins should NOT exist (unless they already did)
-        for bin_name in Workspace.STANDARD_BINS:
-            bin_path = ws.root / bin_name
-            # They shouldn't exist since we disabled creation
-            assert not bin_path.exists()
+        # Record which bins exist AFTER workspace init
+        bins_after = {item.name for item in ws.root.iterdir() 
+                     if item.is_dir() and item.name in Workspace.STANDARD_BINS}
+        
+        # No NEW bins should have been created
+        new_bins = bins_after - bins_before
+        assert len(new_bins) == 0, f"Bins were created when disabled: {new_bins}"
     
     def test_get_run_dir_creates_directory(self, tmp_path):
         """get_run_dir creates the run directory if it doesn't exist."""

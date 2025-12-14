@@ -167,6 +167,77 @@ def test_get_resource_stats(temp_workspace):
     assert stats["ram_free_percent"] >= 0
 
 
+def test_resolve_nonexistent_path_within_workspace(temp_workspace):
+    """Test resolving a non-existent path within workspace (Phase 1.6.1).
+    
+    This should work - we should be able to resolve paths that don't exist yet.
+    The normalization should not throw errors for non-existent paths.
+    """
+    # Should not raise an error even though path doesn't exist
+    resolved = temp_workspace.resolve("data/nonexistent/file.txt")
+    
+    # Should be within workspace
+    assert str(temp_workspace.root) in str(resolved)
+    assert resolved.name == "file.txt"
+    # Verify it's properly normalized (this would fail with old buggy resolve())
+    assert resolved.is_absolute()
+
+
+def test_strip_workspace_prefix_simple(temp_workspace):
+    """Test stripping workspace/ prefix from simple paths."""
+    result = temp_workspace._strip_workspace_prefix("workspace/data/test.csv")
+    assert result == "data/test.csv"
+    
+    result = temp_workspace._strip_workspace_prefix("data/test.csv")
+    assert result == "data/test.csv"
+
+
+def test_strip_workspace_prefix_nested_workspace_folder(temp_workspace):
+    """Test that workspace/workspace/test.txt is handled correctly (Phase 1.6.1).
+    
+    If user has a subfolder literally named 'workspace' inside the workspace,
+    the stripping logic should handle it correctly:
+    - String "workspace/test.txt" gets stripped (agent mistake assumed)
+    - Path object Path("workspace/test.txt") does NOT get stripped (intentional)
+    
+    This prevents false positives while still handling agent confusion.
+    """
+    # Create a subfolder literally named "workspace" inside workspace
+    nested_ws_dir = temp_workspace.root / "workspace"
+    nested_ws_dir.mkdir(exist_ok=True)
+    test_file = nested_ws_dir / "test.txt"
+    test_file.write_text("test")
+    
+    # Test the strip function directly
+    # "workspace/workspace/test.txt" -> strip first segment -> "workspace/test.txt"
+    result = temp_workspace._strip_workspace_prefix("workspace/workspace/test.txt")
+    assert result == "workspace/test.txt"
+    
+    # When resolving a STRING "workspace/test.txt", it gets stripped
+    resolved_string = temp_workspace.resolve("workspace/test.txt")
+    # This resolves to root/test.txt (NOT the subfolder)
+    assert resolved_string == temp_workspace.root / "test.txt"
+    
+    # To access the real workspace subfolder, pass a Path object (no stripping)
+    resolved_path = temp_workspace.resolve(Path("workspace") / "test.txt")
+    assert resolved_path == test_file
+    
+    # Or use a string that doesn't start with "workspace/"
+    # (though in this case there's no such string for this path)
+
+
+def test_normalize_path_does_not_double_resolve(temp_workspace):
+    """Test that _normalize_path doesn't call resolve() again (Phase 1.6.1)."""
+    # Create a path that's already resolved
+    test_path = temp_workspace.root / "data" / "test.txt"
+    
+    # Normalize should work on already-resolved paths without issues
+    normalized = temp_workspace._normalize_path(test_path)
+    
+    # Should be same path (or equivalent on Windows with case normalization)
+    assert normalized == test_path or str(normalized).lower() == str(test_path).lower()
+
+
 if __name__ == "__main__":
     # Run tests
     print("Running workspace tests...")

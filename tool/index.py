@@ -192,7 +192,10 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     
     # GitHub ingestion (Phase 1.7)
     if config.get("enable_github", True):
-        registry.register(GitHubIngest())
+        # Create VectorGit instance for indexing (Phase 1.7.1)
+        from .vectorgit import VectorGit
+        vectorgit = VectorGit()
+        registry.register(GitHubIngest(vectorgit=vectorgit))
     
     # Skill management tool (Phase 0.4)
     if config.get("enable_promote_skill", True):
