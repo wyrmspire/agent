@@ -152,9 +152,12 @@ class VectorStore:
             # After save, the actual file is embeddings.tmp.npz
             vectors_tmp = self.store_path / "embeddings.tmp.npz"
             
-            # Flush to disk
-            with open(vectors_tmp, 'rb') as f:
-                os.fsync(f.fileno())
+            # Flush to disk (best-effort, numpy already flushed)
+            try:
+                with open(vectors_tmp, 'rb') as f:
+                    os.fsync(f.fileno())
+            except OSError:
+                pass  # fsync may fail on Windows; numpy already flushed
             
             # Atomic replace (POSIX/Windows safe)
             os.replace(vectors_tmp, self.vectors_path)

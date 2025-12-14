@@ -25,8 +25,8 @@ echo "========================================================"
 echo "generating project structure..."
 echo "========================================================"
 
-# Generate project structure and save to variable
-PROJECT_STRUCTURE=$(find . \( $IGNORE_ARGS -print0 \) | sed 's/.\///' | sed -e 's;[^/]*/;|____;g;s;____|; |;g')
+# Generate project structure and save to variable (use -print not -print0 to avoid null byte warning)
+PROJECT_STRUCTURE=$(find . \( $IGNORE_ARGS -print \) 2>/dev/null | grep -v "^\.$" | sed 's/.\///' | sed -e 's;[^/]*/;|____;g;s;____|; |;g')
 
 echo ""
 echo "========================================================"
