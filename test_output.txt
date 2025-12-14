@@ -1,0 +1,117 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- C:\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\agent
+plugins: asyncio-1.3.0, anyio-4.10.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 3 items
+
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_keywords DEBUG: Ingested 0 chunks in fixture
+DEBUG: Test fixture chunk_content id=1774099236352
+DEBUG: Chunks: []
+DEBUG: Content Keys: []
+
+DEBUG: Direct search 'postgres'
+DEBUG: search_chunks self.chunk_content id=1774099236352
+DEBUG: search_chunks keys sample=[]
+Direct results: 0
+DEBUG: search_chunks self.chunk_content id=1774099236352
+DEBUG: search_chunks keys sample=[]
+Query results: 0
+DEBUG: 'postgres' NOT FOUND in any chunk content
+FAILED
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_no_results DEBUG: Ingested 4 chunks in fixture
+DEBUG: Test fixture chunk_content id=1774100083648
+DEBUG: Chunks: ['chunk_7ea4782487d46187', 'chunk_380152cf427462a8', 'chunk_c98cd1c003c2fbfa', 'chunk_00ec601fe0356956']
+DEBUG: Content Keys: ['chunk_7ea4782487d46187', 'chunk_380152cf427462a8', 'chunk_c98cd1c003c2fbfa', 'chunk_00ec601fe0356956']
+DEBUG: Content[chunk_7ea4782487d46187]: def connect_db():
+  ...
+DEBUG: Content[chunk_380152cf427462a8]: def query_users():
+ ...
+DEBUG: Content[chunk_c98cd1c003c2fbfa]: def render_button():...
+DEBUG: Content[chunk_00ec601fe0356956]: def handle_click():
+...
+DEBUG: search_chunks self.chunk_content id=1774100083648
+DEBUG: search_chunks keys sample=['chunk_7ea4782487d46187', 'chunk_380152cf427462a8', 'chunk_c98cd1c003c2fbfa']
+DEBUG: Checking chunk_7ea4782487d46187 len=70
+DEBUG: Checking chunk_380152cf427462a8 len=52
+DEBUG: Checking chunk_c98cd1c003c2fbfa len=62
+DEBUG: Checking chunk_00ec601fe0356956 len=48
+PASSED
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_context_snippet DEBUG: Ingested 4 chunks in fixture
+DEBUG: Test fixture chunk_content id=1774100082432
+DEBUG: Chunks: ['chunk_7ea4782487d46187', 'chunk_380152cf427462a8', 'chunk_c98cd1c003c2fbfa', 'chunk_00ec601fe0356956']
+DEBUG: Content Keys: ['chunk_7ea4782487d46187', 'chunk_380152cf427462a8', 'chunk_c98cd1c003c2fbfa', 'chunk_00ec601fe0356956']
+DEBUG: Content[chunk_7ea4782487d46187]: def connect_db():
+  ...
+DEBUG: Content[chunk_380152cf427462a8]: def query_users():
+ ...
+DEBUG: Content[chunk_c98cd1c003c2fbfa]: def render_button():...
+DEBUG: Content[chunk_00ec601fe0356956]: def handle_click():
+...
+DEBUG: search_chunks self.chunk_content id=1774100082432
+DEBUG: search_chunks keys sample=['chunk_7ea4782487d46187', 'chunk_380152cf427462a8', 'chunk_c98cd1c003c2fbfa']
+DEBUG: Checking chunk_7ea4782487d46187 len=70
+DEBUG: Checking chunk_380152cf427462a8 len=52
+DEBUG: Match found for chunk_380152cf427462a8
+DEBUG: Checking chunk_c98cd1c003c2fbfa len=62
+DEBUG: Checking chunk_00ec601fe0356956 len=48
+PASSED
+
+================================== FAILURES ===================================
+___________________ TestVectorGitQuery.test_query_keywords ____________________
+
+self = <test_query.TestVectorGitQuery object at 0x0000019D10954410>
+vg_with_data = <tool.vectorgit.VectorGit object at 0x0000019D108EFCB0>
+
+    def test_query_keywords(self, vg_with_data):
+        """Test retrieving by specific unique keywords."""
+    
+        # Debug: Direct search on manager
+        print("\nDEBUG: Direct search 'postgres'")
+        direct_results = vg_with_data.chunk_manager.search_chunks("postgres")
+        print(f"Direct results: {len(direct_results)}")
+    
+        # Search for DB concept
+        results = vg_with_data.query("postgres")
+        print(f"Query results: {len(results)}")
+    
+        # Verify content has 'postgres'
+        found = False
+        for cid, content in vg_with_data.chunk_manager.chunk_content.items():
+            if "postgres" in content.lower():
+                print(f"DEBUG: Found 'postgres' in chunk {cid}")
+                found = True
+        if not found:
+            print("DEBUG: 'postgres' NOT FOUND in any chunk content")
+    
+>       assert len(results) >= 1
+E       assert 0 >= 1
+E        +  where 0 = len([])
+
+tests\vectorgit\test_query.py:72: AssertionError
+============================== warnings summary ===============================
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_keywords
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_no_results
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_context_snippet
+  C:\agent\store\chunks.py:617: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_updated": datetime.utcnow().isoformat(),
+
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_no_results
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_no_results
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_context_snippet
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_context_snippet
+  C:\agent\store\chunks.py:166: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow().isoformat(),
+
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_no_results
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_no_results
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_context_snippet
+tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_context_snippet
+  C:\agent\store\chunks.py:217: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/vectorgit/test_query.py::TestVectorGitQuery::test_query_keywords
+================== 1 failed, 2 passed, 11 warnings in 0.09s ===================
