@@ -129,6 +129,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     from .chunk_search import ChunkSearchTool
     from .patch import CreatePatchTool, ListPatchesTool, GetPatchTool
     from .queue import QueueAddTool, QueueNextTool, QueueDoneTool, QueueFailTool
+    from .github import GitHubIngest
     
     # Default to all enabled if no config provided
     if config is None:
@@ -142,6 +143,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             "enable_chunk_search": True,
             "enable_patch": True,
             "enable_queue": True,
+            "enable_github": True,  # Phase 1.7
         }
     
     registry = ToolRegistry()
@@ -187,6 +189,10 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
         registry.register(QueueNextTool())
         registry.register(QueueDoneTool())
         registry.register(QueueFailTool())
+    
+    # GitHub ingestion (Phase 1.7)
+    if config.get("enable_github", True):
+        registry.register(GitHubIngest())
     
     # Skill management tool (Phase 0.4)
     if config.get("enable_promote_skill", True):

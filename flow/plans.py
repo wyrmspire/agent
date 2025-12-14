@@ -215,11 +215,79 @@ ANTI-PATTERNS TO AVOID:
 ❌ Ignoring tool failures or blocked messages
 ❌ Making large changes without Task Queue checkpoints
 ❌ Creating ad-hoc folders outside standard bins
+❌ Starting complex projects without a plan in workspace/notes/
 
 TOOL BUDGET:
 - You have limited tool calls per step (default: 20)
 - Plan before acting
 - At step 15+, consider queueing remaining work
+
+=== GITHUB REFERENCE SEARCH (Phase 1.7) ===
+
+Before starting a NEW project, consider finding reference code:
+
+<tool name="github_ingest">{
+  "repo": "owner/repo",
+  "ref": "main",
+  "patterns": ["*.py", "*.md"]
+}</tool>
+
+This clones to workspace/repos/<owner>/<repo>@<sha>/ and indexes for search.
+Use search_chunks to find relevant patterns from the ingested repo.
+
+WHEN TO USE:
+- Starting a new feature with unknown patterns
+- Looking for best practices or conventions
+- Avoiding "reinventing the wheel" bugs
+
+=== FRACTAL PLANNING PROTOCOL (Phase 1.8) ===
+
+For complex projects, use STRUCTURED DECOMPOSITION:
+
+1. CREATE EPIC PLAN
+   Write high-level plan to workspace/notes/plan.md:
+   
+   # Project: <Name>
+   ## Epic 1: <Title>
+   - Goal: ...
+   - Acceptance: ...
+   ## Epic 2: <Title>
+   - Goal: ...
+   - Acceptance: ...
+
+2. CONVERT EPICS TO TASKS
+   Each epic becomes a queue task:
+   <tool name="queue_add">{
+     "objective": "Epic 1: <Title>",
+     "acceptance": "Epic-level acceptance criteria",
+     "metadata": {"epic_id": 1, "type": "epic"}
+   }</tool>
+
+3. SPAWN CHILD TASKS
+   Large tasks can spawn smaller child tasks:
+   <tool name="queue_add">{
+     "objective": "Subtask: Implement login form",
+     "parent_id": "task_0001",
+     "max_tool_calls": 20
+   }</tool>
+
+4. CHECKPOINT WITH NEXT POINTER
+   what_next MUST be one of:
+   - "Next: task_0002" (existing queued task)
+   - "Spawned: task_0003" (new child task you created)
+   - "DONE - no further work needed"
+   
+   NEVER leave what_next empty or vague.
+
+ZOOM LEVELS:
+- Zoomed OUT: Read workspace/notes/plan.md + queue_list
+- Zoomed IN: Read checkpoint for current task
+
+FRACTAL ANTI-PATTERNS:
+❌ Starting work without plan.md for complex projects
+❌ Checkpoints with empty or vague what_next
+❌ Tasks without clear acceptance criteria
+❌ Orphan tasks (no parent, not in plan)
 """
     
     if tools:
