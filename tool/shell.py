@@ -37,7 +37,7 @@ class ShellTool(BaseTool):
     
     @property
     def description(self) -> str:
-        return f"Execute a shell command and return output. Timeout: {self.timeout}s. Use with caution."
+        return f"Execute a shell command. CWD: {self.cwd}. Timeout: {self.timeout}s."
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -101,12 +101,17 @@ class ShellTool(BaseTool):
             
             # Check return code
             success = process.returncode == 0
+            error_message = None
+            
             if not success:
                 output += f"\n\nExit code: {process.returncode}"
+                # IMPORTANT: Populate error field because AgentLoop uses result.error when success=False
+                error_message = f"Command failed with exit code {process.returncode}. Output:\n{output}"
             
             return ToolResult(
                 tool_call_id="",
                 output=output,
+                error=error_message,
                 success=success,
             )
         

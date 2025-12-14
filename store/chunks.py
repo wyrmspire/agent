@@ -67,6 +67,14 @@ class ChunkManager:
         r"private[_-]?key",
         r"__pycache__",
         r"\.pyc$",
+        r"node_modules/",
+        r"dist/",
+        r"build/",
+        r"\.venv/",
+        r"venv/",
+        r"target/",
+        r"bin/",
+        r"obj/",
     ]
     
     # File extensions to process
@@ -505,11 +513,13 @@ class ChunkManager:
                     "snippet": self._get_snippet(content, query_lower),
                 })
         
-        # Sort by relevance (simple: count occurrences)
-        results.sort(
-            key=lambda x: x["content"].lower().count(query_lower),
-            reverse=True,
-        )
+        # Sort by relevance (count) then by location (stable tie-break)
+        # We negate the count for descending order, while path and line are ascending
+        results.sort(key=lambda x: (
+            -x["content"].lower().count(query_lower),  # Descending count
+            x["source_path"],                          # Ascending path
+            x["start_line"]                            # Ascending line
+        ))
         
         return results[:k]
     

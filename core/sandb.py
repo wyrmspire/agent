@@ -101,7 +101,7 @@ class Workspace:
             self._project_root / "flow",
             self._project_root / "model",
             self._project_root / "tool",
-            self._project_root / "tests",
+            # self._project_root / "tests", # Unblocked for agent test creation
         ]
         
         # Files blocked from any access

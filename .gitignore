@@ -64,6 +64,9 @@ dump*.md
 
 # Workspace (Phase 0.2)
 workspace/
+!workspace/*.py
+!workspace/*.txt
+!workspace/*.md
 
 # Eval Harness Output (Phase 0.5)
 eval_results.json

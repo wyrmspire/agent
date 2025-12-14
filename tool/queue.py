@@ -442,7 +442,14 @@ class QueueFailTool(BaseTool):
                 )
             
             what_was_done = arguments.get("what_was_done", "No work completed")
+            
+            # Merge enriched change signals into what_changed
             what_changed = arguments.get("what_changed", [])
+            if "patch_ids" in arguments:
+                what_changed.extend([f"patch:{pid}" for pid in arguments["patch_ids"]])
+            if "files_touched" in arguments:
+                what_changed.extend([f"file:{f}" for f in arguments["files_touched"]])
+                
             blockers = arguments.get("blockers", [error])
             citations = arguments.get("citations", [])
             

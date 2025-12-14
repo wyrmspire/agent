@@ -25,7 +25,9 @@ async def demo_vectorgit():
     print("="*60 + "\n")
     
     # Initialize VectorGit
-    vg = VectorGit(workspace_path="/tmp/demo_workspace")
+    # Initialize VectorGit
+    demo_root = Path(__file__).parent.parent / "workspace" / "demo_08"
+    vg = VectorGit(workspace_path=str(demo_root))
     
     # Ingest current project
     print("📥 Ingesting repository...")
@@ -52,7 +54,9 @@ async def demo_task_queue():
     print("="*60 + "\n")
     
     # Initialize TaskQueue
-    queue = TaskQueue(workspace_path="/tmp/demo_workspace")
+    # Initialize TaskQueue
+    demo_root = Path(__file__).parent.parent / "workspace" / "demo_08"
+    queue = TaskQueue(workspace_path=str(demo_root))
     
     # Add tasks
     print("📝 Adding tasks to queue...\n")

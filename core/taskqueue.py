@@ -107,7 +107,9 @@ class TaskQueue:
         self.workspace_root = Path(workspace_path)
         self.queue_dir = self.workspace_root / queue_name
         self.tasks_file = self.queue_dir / "tasks.jsonl"
+        self.tasks_file = self.queue_dir / "tasks.jsonl"
         self.checkpoints_dir = self.queue_dir / "checkpoints"
+        self.active_task_file = self.queue_dir / "active_task.json"
         
         # Create directories
         self.queue_dir.mkdir(parents=True, exist_ok=True)
@@ -223,6 +225,9 @@ class TaskQueue:
                 task.updated_at = datetime.now(timezone.utc).isoformat()
                 self._update_task(task)
                 
+                # Persist active task for agent loop
+                self.active_task_file.write_text(json.dumps(asdict(task), indent=2))
+                
                 logger.info(f"Starting task {task.task_id}")
                 return task
         
@@ -256,6 +261,16 @@ class TaskQueue:
         if checkpoint:
             self.save_checkpoint(checkpoint)
         
+        # Cleanup active task file
+        if self.active_task_file.exists():
+            try:
+                # Only delete if it matches the current task
+                active = json.loads(self.active_task_file.read_text())
+                if active.get("task_id") == task_id:
+                    self.active_task_file.unlink()
+            except Exception:
+                pass # Best effort cleanup
+
         logger.info(f"Marked task {task_id} as done")
         return True
     
@@ -288,6 +303,16 @@ class TaskQueue:
         # Save checkpoint if provided
         if checkpoint:
             self.save_checkpoint(checkpoint)
+            
+        # Cleanup active task file
+        if self.active_task_file.exists():
+            try:
+                # Only delete if it matches the current task
+                active = json.loads(self.active_task_file.read_text())
+                if active.get("task_id") == task_id:
+                    self.active_task_file.unlink()
+            except Exception:
+                pass # Best effort cleanup
         
         logger.info(f"Marked task {task_id} as failed: {error}")
         return True

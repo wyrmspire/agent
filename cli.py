@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from core.types import MessageRole
 from core.state import AgentState, ConversationState, ExecutionContext
 from core.rules import get_default_engine
-from gate.lmstd import LMStudioGateway
+# from gate.lmstd import LMStudioGateway  # Removed per user request
 from tool.index import create_default_registry
 from flow.loops import AgentLoop
 from flow.plans import create_system_prompt
@@ -54,6 +54,8 @@ async def main():
     parser = argparse.ArgumentParser(description="Agent CLI")
     parser.add_argument("--mock", action="store_true", help="Use mock model instead of real server")
     parser.add_argument("--gemini", action="store_true", help="Use Gemini API (requires GEMINI_API_KEY)")
+    parser.add_argument("--test-embed", type=str, help="Test embedding generation for text")
+    parser.add_argument("--promote", type=str, help="Apply a promotion spec file (JSON) to the repo")
     args = parser.parse_args()
 
     # Create gateway based on config/args
@@ -63,18 +65,18 @@ async def main():
             from gate.mock import MockGateway
             gateway = MockGateway()
         
-        elif args.gemini or config["gateway"] == "gemini":
+        elif args.gemini or config.get("gateway") == "gemini" or config.get("gemini_api_key"):
             # Use Gemini API
-            api_key = config["gemini_api_key"]
+            api_key = config.get("gemini_api_key")
             if not api_key:
                 print("[ERROR] GEMINI_API_KEY not set in .env")
                 return 1
             
             from gate.gemini import GeminiGateway
-            print(f"[GEMINI] Using Gemini API ({config['gemini_model']})")
+            print(f"[GEMINI] Using Gemini API ({config.get('gemini_model', 'gemini-2.5-flash')})")
             gateway = GeminiGateway(
                 api_key=api_key,
-                model=config["gemini_model"],
+                model=config.get("gemini_model", "gemini-2.5-flash"),
             )
             
             # Health check
@@ -88,26 +90,61 @@ async def main():
             print("[OK] Connected to Gemini API\n")
         
         else:
-            # Default: local model server
-            gateway = LMStudioGateway(
-                base_url=config["model_url"],
-                model=config["model"],
+            # Default: Local / OpenAI Compatible
+            from gate.openai_compat import OpenAICompatGateway
+            
+            model_url = config.get("model_url", "http://localhost:1234/v1")
+            model_name = config.get("model", "local-model")
+            
+            print(f"[LOCAL] Connecting to {model_url} ({model_name})")
+            gateway = OpenAICompatGateway(
+                base_url=model_url,
+                model=model_name,
             )
             
             # Health check
             print("Checking model gateway...")
             healthy = await gateway.health_check()
             if not healthy:
-                print(f"[ERROR] Cannot connect to model gateway at {config['model_url']}")
-                print(f"   Make sure the model server is running")
-                print("   And a model is loaded")
+                print(f"[ERROR] Cannot connect to model gateway at {model_url}")
+                print(f"   Make sure your local server (Qwen/vLLM/etc) is running.")
                 return 1
             
-            print("[OK] Connected to model gateway\n")
-        
+            print("[OK] Connected to local model\n")
+            
     except Exception as e:
         print(f"[ERROR] Error connecting to gateway: {e}")
         return 1
+    
+    # Validation mode: Test embedding
+    if args.test_embed:
+        print(f"\n[TEST] Generating embedding for: '{args.test_embed}'")
+        try:
+            from gate.bases import EmbeddingGateway
+            if isinstance(gateway, EmbeddingGateway):
+                vec = await gateway.embed_single(args.test_embed)
+                print(f"[OK] Generated vector: dim={len(vec)}, sample={vec[:3]}...")
+                return 0
+            else:
+                print(f"[ERROR] Gateway {type(gateway).__name__} does not support embeddings")
+                return 1
+        except Exception as e:
+            print(f"[ERROR] Embedding failed: {e}")
+            return 1
+            
+    if args.promote:
+        print(f"\n[PROMOTION] Applying spec: {args.promote}")
+        try:
+            from tool.promote import PromotionManager
+            manager = PromotionManager(project_root=".")
+            report = manager.apply_spec(args.promote)
+            print(report)
+            return 0
+        except Exception as e:
+            print(f"[ERROR] Promotion failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
     
     # Create tool registry
     tools = create_default_registry(config)

@@ -22,15 +22,21 @@ Rules:
 - Never throw exceptions to caller
 """
 
+
 import logging
 import time
-from typing import List, Optional
-from dataclasses import dataclass
+import json
+from typing import List, Optional, Dict, Any
+from pathlib import Path
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 
 from core.types import Message, MessageRole, ToolCall, ToolResult, Step, StepType
 from core.state import AgentState, ConversationState, ExecutionContext
 from core.rules import RuleEngine
 from core.trace import TraceLogger
+from core.taskqueue import TaskQueue, Checkpoint
+from core.sandb import get_default_workspace
 from gate.bases import ModelGateway
 from tool.index import ToolRegistry
 from flow.judge import AgentJudge
@@ -84,6 +90,47 @@ class AgentLoop:
         self.max_steps = max_steps
         self.temperature = temperature
         self.judge = AgentJudge() if enable_judge else None
+        
+        # Phase 0.8B: Active Task Tracking
+        self.workspace_root = Path(get_default_workspace().base_path)
+        self.active_task_file = self.workspace_root / "queue" / "active_task.json"
+        
+    def _load_active_task(self) -> Optional[Dict[str, Any]]:
+        """Load active task definition if present."""
+        if self.active_task_file.exists():
+            try:
+                task_data = json.loads(self.active_task_file.read_text())
+                logger.info(f"Loaded active task: {task_data.get('task_id')}")
+                return task_data
+            except Exception as e:
+                logger.error(f"Failed to load active task: {e}")
+        return None
+
+    def _fail_active_task(self, task_data: Dict[str, Any], reason: str, state: AgentState) -> None:
+        """Mark active task as failed directly via TaskQueue."""
+        try:
+            queue = TaskQueue(workspace_path=str(self.workspace_root))
+            checkpoint = Checkpoint(
+                task_id=task_data["task_id"],
+                what_was_done=f"Task terminated by agent loop. {reason}",
+                what_changed=[], # Could be enriched from state if tracked
+                what_next="Handle failure or increase budget",
+                blockers=[reason],
+                citations=[],
+                created_at=datetime.now(timezone.utc).isoformat()
+            )
+            # Mark failed and cleanup active_task.json (handled by queue.mark_failed in our updated logic)
+            # Actually our updated queue.mark_failed does cleanup, but we should ensure it
+            queue.mark_failed(task_data["task_id"], reason, checkpoint)
+            
+            # Explicitly ensure cleanup just in case
+            if self.active_task_file.exists():
+                active = json.loads(self.active_task_file.read_text())
+                if active.get("task_id") == task_data["task_id"]:
+                    self.active_task_file.unlink()
+                    
+        except Exception as e:
+            logger.error(f"Failed to mark task failed: {e}")
     
     async def run(
         self,
@@ -135,23 +182,41 @@ class AgentLoop:
             )
     
     async def _reasoning_loop(self, state: AgentState, tracer: TraceLogger) -> str:
-        """Internal reasoning loop.
+        """Internal reasoning loop."""
         
-        Continues until:
-        - Model provides final answer (no more tool calls)
-        - Max steps reached
-        - Error occurs
+        # Load active task to enforce budget
+        active_task = self._load_active_task()
+        task_budget = active_task.get("budget", {}) if active_task else {}
         
-        Args:
-            state: Agent state
-            tracer: TraceLogger instance for this run
+        # Counters
+        # steps_used is tracked in state.execution.current_step (which persists across turns if state does)
+        # tool_calls_used needs to be tracked. Since we restart the loop per run, 
+        # we assume tool_calls_used for THIS run starting at 0, OR we would need to persist it.
+        # For Phase 0.8B, we'll track for this session. Ideally this should be in state.
+        tool_calls_used = 0
         
-        Returns:
-            Final answer string
-        """
+        max_tool_calls_limit = task_budget.get("max_tool_calls", 100) # Default high if no task
+        max_steps_limit = task_budget.get("max_steps", self.max_steps)
+        
         while state.execution.should_continue():
+            # BUDGET ENFORCEMENT CHECK
+            if active_task:
+                # Check Steps
+                if state.execution.current_step >= max_steps_limit:
+                    reason = f"Step budget exhausted ({state.execution.current_step} >= {max_steps_limit})"
+                    logger.warning(reason)
+                    self._fail_active_task(active_task, "BUDGET_EXHAUSTED: " + reason, state)
+                    return f"Task stopped: {reason}"
+                
+                # Check Tool Calls
+                if tool_calls_used >= max_tool_calls_limit:
+                     reason = f"Tool call budget exhausted ({tool_calls_used} >= {max_tool_calls_limit})"
+                     logger.warning(reason)
+                     self._fail_active_task(active_task, "BUDGET_EXHAUSTED: " + reason, state)
+                     return f"Task stopped: {reason}"
+
             step_num = state.execution.current_step + 1
-            logger.info(f"Step {step_num}/{self.max_steps}")
+            logger.info(f"Step {step_num}/{max_steps_limit}")
             
             # Get tool definitions
             tool_defs = self.tools.get_tool_definitions() if self.tools.count > 0 else None
@@ -188,7 +253,19 @@ class AgentLoop:
                     continue
                 
                 # Execute tools (with per-tool budget enforcement)
-                tool_results, budget_hit = await self._execute_tools(state, response.tool_calls, tracer)
+                # Pass incremented tool_calls_used to _execute_tools or update it after?
+                # We need to update our local counter.
+                tool_results, budget_hit = await self._execute_tools(state, response.tool_calls, tracer, active_task, tool_calls_used, max_tool_calls_limit)
+                
+                # Update usage
+                tool_calls_used += len(tool_results)
+                
+                # If budget hit inside execution (the method handles hard stop), 
+                # we might need to break immediately if it failed the task.
+                if budget_hit and active_task:
+                     # Re-check if we need provided hard stop
+                     if tool_calls_used >= max_tool_calls_limit:
+                         return "Task stopped: Tool call budget exhausted."
                 
                 # Print tool results to terminal for user visibility
                 for i, result in enumerate(tool_results):
@@ -280,6 +357,9 @@ class AgentLoop:
         state: AgentState,
         tool_calls: List[ToolCall],
         tracer: TraceLogger,
+        active_task: Optional[Dict[str, Any]],
+        current_tool_usage: int,
+        max_tool_usage: int,
     ) -> tuple[List[ToolResult], bool]:
         """Execute a list of tool calls with per-tool budget enforcement.
         
@@ -302,13 +382,25 @@ class AgentLoop:
         budget_hit = False
         
         for tool_call in tool_calls:
-            # Phase 0.5: Check budget BEFORE each tool (hard stop mid-batch)
+            # Global Budget Check for Active Task
+            if active_task:
+                 if current_tool_usage >= max_tool_usage:
+                     reason = f"Tool call budget exhausted ({current_tool_usage} >= {max_tool_usage})"
+                     logger.warning(reason)
+                     self._fail_active_task(active_task, "BUDGET_EXHAUSTED: " + reason, state)
+                     budget_hit = True
+                     break
+                
+            # Phase 0.5: Check state-based budget (legacy)
             if not state.execution.can_use_tool():
                 logger.warning(f"Budget exhausted mid-batch, skipping {tool_call.name} and remaining tools")
                 budget_hit = True
                 break  # Stop executing remaining tools
             
             logger.info(f"Executing tool: {tool_call.name}")
+            
+            # Increment usage for next check in loop
+            current_tool_usage += 1
             
             # Trace: Log tool call initiation
             tracer.log_tool_call(tool_call)

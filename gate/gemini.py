@@ -18,12 +18,12 @@ import google.generativeai as genai
 
 from core.types import Message, Tool, MessageRole, ToolCall
 from core.proto import AgentResponse, StreamChunk, ResponseType
-from .bases import ModelGateway
+from .bases import ModelGateway, EmbeddingGateway
 
 logger = logging.getLogger(__name__)
 
 
-class GeminiGateway(ModelGateway):
+class GeminiGateway(ModelGateway, EmbeddingGateway):
     """ModelGateway implementation for Google Gemini API.
     
     Uses the google-generativeai SDK for direct API access.
@@ -183,6 +183,35 @@ class GeminiGateway(ModelGateway):
             logger.error(f"Gemini streaming error: {e}")
             raise
     
+    async def embed(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for a list of texts."""
+        if not texts:
+            return []
+            
+        try:
+            # Gemini embedding model
+            # Note: Older keys might need 'models/embedding-001' or 'models/text-embedding-004'
+            # We'll default to text-embedding-004 if available, else embedding-001
+            # For simplicity, let's try the modern standard first
+            embedding_model = "models/text-embedding-004"
+            
+            result = genai.embed_content(
+                model=embedding_model,
+                content=texts,
+                task_type="retrieval_document", 
+            )
+            
+            # Result is dict with 'embedding' key which is list of lists
+            return result['embedding']
+        except Exception as e:
+            logger.error(f"Gemini embedding error: {e}")
+            raise
+
+    async def embed_single(self, text: str) -> List[float]:
+        """Generate embedding for a single text."""
+        embeddings = await self.embed([text])
+        return embeddings[0] if embeddings else []
+
     async def health_check(self) -> bool:
         """Check if Gemini API is accessible."""
         try:
