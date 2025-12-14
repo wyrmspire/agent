@@ -33,7 +33,7 @@ class CorruptedIndexError(Exception):
 class VectorStore:
     """Manages vector embeddings and similarity search."""
     
-    def __init__(self, store_path: str = "./store/vectors"):
+    def __init__(self, store_path: str = "./store/vectors", auto_load: bool = True):
         self.store_path = Path(store_path)
         self.vectors_path = self.store_path / "embeddings.npz"
         self.manifest_path = self.store_path / "vectors_manifest.json"
@@ -54,7 +54,32 @@ class VectorStore:
         self.store_path.mkdir(parents=True, exist_ok=True)
         
         # Load if exists
-        self.load()
+        if auto_load:
+            self.load()
+    
+    @classmethod
+    def try_load(cls, store_path: str) -> 'VectorStore':
+        """Create VectorStore and load, handling corruption.
+        
+        Args:
+            store_path: Path to vector store
+            
+        Returns:
+            Initialized VectorStore (empty if corrupted)
+            
+        Raises:
+            CorruptedIndexError: If corruption detected and cannot recover
+        """
+        store = cls(store_path, auto_load=False)
+        try:
+            store.load()
+        except CorruptedIndexError:
+            # Return empty store on corruption
+            logger.warning("Corruption detected, returning empty store")
+            store.vectors = None
+            store.chunk_ids = []
+            store.id_to_index = {}
+        return store
     
     def load(self) -> bool:
         """Load vectors and manifest from disk with corruption detection.
@@ -121,9 +146,11 @@ class VectorStore:
             
             # Phase 1.3: Atomic write for vectors
             # Note: np.savez_compressed automatically adds .npz extension
-            vectors_tmp_base = self.store_path / "embeddings_tmp"
+            # So we save without extension and it becomes .npz
+            vectors_tmp_base = self.store_path / "embeddings.tmp"
             np.savez_compressed(vectors_tmp_base, vectors=self.vectors)
-            vectors_tmp = self.store_path / "embeddings_tmp.npz"
+            # After save, the actual file is embeddings.tmp.npz
+            vectors_tmp = self.store_path / "embeddings.tmp.npz"
             
             # Flush to disk
             with open(vectors_tmp, 'rb') as f:
@@ -149,7 +176,7 @@ class VectorStore:
             logger.error(f"Failed to save vector store: {e}")
             # Clean up temp files if they exist
             try:
-                vectors_tmp = self.store_path / "embeddings_tmp.npz"
+                vectors_tmp = self.store_path / "embeddings.tmp.npz"
                 if vectors_tmp.exists():
                     vectors_tmp.unlink()
                 manifest_tmp = Path(str(self.manifest_path) + '.tmp')

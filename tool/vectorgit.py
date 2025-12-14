@@ -58,41 +58,21 @@ class VectorGit:
         
         # Initialize VectorStore with corruption handling (Phase 1.3)
         self.vector_store_path = self.index_dir / "vectors"
-        self.vector_store = None
         
-        # Try to load, catching corruption
-        try:
-            store = VectorStore.__new__(VectorStore)
-            store.store_path = Path(str(self.vector_store_path))
-            store.vectors_path = store.store_path / "embeddings.npz"
-            store.manifest_path = store.store_path / "vectors_manifest.json"
-            store.vectors = None
-            store.chunk_ids = []
-            store.id_to_index = {}
-            store.metadata = {
-                "embedding_model": "unknown",
-                "dim": 0,
-                "count": 0,
-                "normalized": True,
-                "updated_at": ""
-            }
-            store.store_path.mkdir(parents=True, exist_ok=True)
-            
-            # Try to load
-            store.load()
-            self.vector_store = store
-            
-        except CorruptedIndexError as e:
-            logger.warning(f"Index corruption detected during initialization: {e}")
-            self.corruption_detected = True
-            if self.auto_heal:
-                logger.info("Auto-healing enabled: will rebuild vectors on next embed operation")
-                # Use the partially initialized store
-                self.vector_store = store
-                self.vector_store.vectors = None
-                self.vector_store.chunk_ids = []
-                self.vector_store.id_to_index = {}
-            else:
+        if self.auto_heal:
+            # Use try_load which handles corruption gracefully
+            self.vector_store = VectorStore.try_load(str(self.vector_store_path))
+            # Check if it's empty (was corrupted)
+            if self.vector_store.vectors is None and self.vector_store.manifest_path.exists():
+                logger.info("Auto-healing: will rebuild vectors on next embed operation")
+                self.corruption_detected = True
+        else:
+            # Strict mode: raise on corruption
+            try:
+                self.vector_store = VectorStore(store_path=str(self.vector_store_path))
+            except CorruptedIndexError as e:
+                logger.error(f"Index corruption detected: {e}")
+                self.corruption_detected = True
                 raise
     
     async def rebuild_vectors(self, gateway: EmbeddingGateway) -> int:

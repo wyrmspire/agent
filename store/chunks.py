@@ -15,9 +15,10 @@ Responsibilities:
 import hashlib
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -182,7 +183,6 @@ class ChunkManager:
         return chunks
 
     def _create_chunk_metadata(self, chunks_list, content, source, start, end, ctype, name):
-        from datetime import timezone
         chunk_hash = self._hash_content(content)
         chunk_id = f"chunk_{chunk_hash}"
         
@@ -203,7 +203,6 @@ class ChunkManager:
         ))
 
     def _chunk_markdown_file(self, content: str, source_path: str) -> List[ChunkMetadata]:
-        from datetime import timezone
         chunks = []
         lines = content.split("\n")
         current_start = None
@@ -245,7 +244,6 @@ class ChunkManager:
         return chunks
 
     def _chunk_generic_file(self, content: str, source_path: str) -> List[ChunkMetadata]:
-        from datetime import timezone
         chunk_hash = self._hash_content(content)
         chunk_id = f"chunk_{chunk_hash}"
         lines = content.split("\n")
@@ -542,9 +540,6 @@ class ChunkManager:
     def save_manifest(self) -> bool:
         """Save manifest using atomic write (Phase 1.3)."""
         try:
-            import os
-            from datetime import timezone
-            
             self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "version": "1.3",  # Updated for Phase 1.3
