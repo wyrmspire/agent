@@ -115,7 +115,7 @@ async def test_read_file_in_workspace(temp_workspace):
     result = await tool.call(tool_call)
     
     assert result.success
-    assert result.output == "Test content"
+    assert "Test content" in result.output  # May include header with new format
 
 
 @pytest.mark.asyncio
@@ -148,7 +148,8 @@ async def test_list_files_in_workspace(temp_workspace):
     tool_call = ToolCall(
         id="test-list-1",
         name="list_files",
-        arguments={"path": "."}
+        # Use absolute path to workspace root since '.' maps to project_root
+        arguments={"path": str(temp_workspace.root)}
     )
     
     result = await tool.call(tool_call)

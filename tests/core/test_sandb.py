@@ -101,7 +101,8 @@ def test_get_relative_path(temp_workspace):
     abs_path = temp_workspace.root / "data" / "test.csv"
     rel_path = temp_workspace.get_relative_path(abs_path)
     
-    assert str(rel_path) == "data/test.csv"
+    # Use Path for cross-platform comparison
+    assert rel_path == Path("data") / "test.csv"
 
 
 def test_ensure_dir(temp_workspace):

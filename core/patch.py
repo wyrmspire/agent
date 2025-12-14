@@ -265,6 +265,27 @@ class PatchManager:
         if not has_valid_start and not has_diff_markers:
             return False, "Invalid diff format (must be unified diff with --- or @@ markers)"
         
+        # Try git apply --check (dry run) to warn about potential issues
+        # Note: This is advisory only - at creation time target files may not exist
+        try:
+            result = subprocess.run(
+                ["git", "apply", "--check", str(Path(patch.diff_file).absolute())],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                # Log warning but don't fail - actual apply will catch issues
+                error_msg = result.stderr.strip()[:200] if result.stderr else "unknown error"
+                logger.warning(f"Diff may have issues: {error_msg}")
+        except FileNotFoundError:
+            # git not available, skip this check
+            logger.debug("git not available for diff validation, skipping apply --check")
+        except subprocess.TimeoutExpired:
+            logger.warning("git apply --check timed out")
+        except Exception as e:
+            logger.warning(f"git apply --check failed: {e}")
+        
         return True, None
     
     def generate_apply_command(self, patch_id: str) -> Optional[str]:

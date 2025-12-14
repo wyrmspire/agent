@@ -4,6 +4,7 @@ tests/tools/test_chunk_search.py - Tests for chunk search tool
 Tests the chunk search tool functionality.
 """
 
+import pytest
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from tool.chunk_search import ChunkSearchTool
 from store.chunks import ChunkManager
 
 
+@pytest.mark.asyncio
 async def test_chunk_search_tool_basic():
     """Test basic chunk search tool execution."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -47,6 +49,7 @@ def calculate_product(a, b):
         assert "calculate_sum" in result.output.lower()
 
 
+@pytest.mark.asyncio
 async def test_chunk_search_tool_with_filters():
     """Test chunk search with filters."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -80,6 +83,7 @@ async def test_chunk_search_tool_with_filters():
         assert ".md" not in result.output
 
 
+@pytest.mark.asyncio
 async def test_chunk_search_tool_no_results():
     """Test chunk search with no results."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -108,6 +112,7 @@ async def test_chunk_search_tool_no_results():
         assert "SUGGESTION" in result.output
 
 
+@pytest.mark.asyncio
 async def test_chunk_search_tool_missing_query():
     """Test chunk search with missing query parameter."""
     tool = ChunkSearchTool()
@@ -121,6 +126,7 @@ async def test_chunk_search_tool_missing_query():
     assert "Missing required parameter" in result.error
 
 
+@pytest.mark.asyncio
 async def test_chunk_search_tool_rebuild_index():
     """Test rebuilding chunk index."""
     with tempfile.TemporaryDirectory() as tmpdir:

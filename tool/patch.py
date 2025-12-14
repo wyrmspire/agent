@@ -17,7 +17,6 @@ Rules:
 """
 
 import logging
-import subprocess
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
@@ -119,6 +118,20 @@ class CreatePatchTool(BaseTool):
                     blocked_by=BlockedBy.RULES,
                     error_code="PATCH_MISSING_FIELDS",
                     message="Missing required fields. Need: title, description, plan, diff, tests",
+                )
+                return ToolResult(
+                    tool_call_id="",
+                    output="",
+                    error=format_tool_error(error),
+                    success=False,
+                )
+            
+            # Validate target_files is a list of strings (LLMs may send weird shapes)
+            if not isinstance(target_files, list) or not all(isinstance(f, str) for f in target_files):
+                error = create_tool_error(
+                    blocked_by=BlockedBy.RULES,
+                    error_code="PATCH_INVALID_TARGETS",
+                    message="target_files must be a list of strings",
                 )
                 return ToolResult(
                     tool_call_id="",
@@ -260,17 +273,23 @@ class ListPatchesTool(BaseTool):
             status_filter = arguments.get("status")
             
             # Convert to PatchStatus enum if provided
+            # Support both value ("applied") and name ("APPLIED") formats
             status_enum = None
             if status_filter:
                 try:
-                    status_enum = PatchStatus(status_filter)
+                    # Try value first (e.g., "applied")
+                    status_enum = PatchStatus(status_filter.lower())
                 except ValueError:
-                    return ToolResult(
-                        tool_call_id="",
-                        output="",
-                        error=f"Invalid status: {status_filter}",
-                        success=False,
-                    )
+                    try:
+                        # Try name (e.g., "APPLIED")
+                        status_enum = PatchStatus[status_filter.upper()]
+                    except KeyError:
+                        return ToolResult(
+                            tool_call_id="",
+                            output="",
+                            error=f"Invalid status: {status_filter}. Valid: proposed, applied, tested, failed, rejected",
+                            success=False,
+                        )
             
             # List patches
             patches = self.patch_manager.list_patches(status=status_enum)
@@ -383,10 +402,16 @@ class GetPatchTool(BaseTool):
                     success=False,
                 )
             
-            # Read files
-            plan = Path(patch.plan_file).read_text() if Path(patch.plan_file).exists() else "N/A"
-            diff = Path(patch.diff_file).read_text() if Path(patch.diff_file).exists() else "N/A"
-            tests = Path(patch.tests_file).read_text() if Path(patch.tests_file).exists() else "N/A"
+            # Read files - anchor to workspace if paths are relative
+            def read_patch_file(file_path: str) -> str:
+                path = Path(file_path)
+                if not path.is_absolute():
+                    path = Path(self.patch_manager.workspace_dir) / path
+                return path.read_text() if path.exists() else "N/A"
+            
+            plan = read_patch_file(patch.plan_file)
+            diff = read_patch_file(patch.diff_file)
+            tests = read_patch_file(patch.tests_file)
             
             # Format output
             output = f"Patch: {patch.patch_id}\n"

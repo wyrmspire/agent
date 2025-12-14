@@ -14,6 +14,19 @@ This is a **local-first agent server** that gives coding models full access to t
 - 🚀 **Dynamic** - Agent can create and promote its own tools
 - 📝 **Well-documented** - Every module has clear purpose and rules
 
+> ⚠️ **LOCAL MODEL MEMORY LIMITS**
+> 
+> Local models (Qwen 7B on 8GB VRAM) can OOM on long conversations with many tool calls.
+> Each tool result adds to context. **Currently no automatic context management.**
+> 
+> **Workarounds:**
+> - Use `--gemini` flag for complex multi-step tasks (Gemini has 1M token context)
+> - Keep local model conversations short
+> - Restart between complex tasks
+> 
+> **Roadmap (v1.0+):** Context truncation, task queuing, and run continuation so local
+> models can break up work and resume across multiple runs.
+
 ## Architecture
 
 ```

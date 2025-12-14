@@ -37,13 +37,23 @@ class ChunkSearchTool(BaseTool):
     def __init__(
         self,
         chunk_manager: Optional[ChunkManager] = None,
+        workspace_dir: str = "./workspace",
     ):
         """Initialize chunk search tool.
         
         Args:
             chunk_manager: Optional custom chunk manager
+            workspace_dir: Workspace directory for chunk storage
         """
-        self.chunk_manager = chunk_manager or ChunkManager()
+        if chunk_manager:
+            self.chunk_manager = chunk_manager
+        else:
+            from pathlib import Path
+            workspace = Path(workspace_dir)
+            self.chunk_manager = ChunkManager(
+                chunks_dir=str(workspace / "chunks"),
+                manifest_path=str(workspace / "chunks_manifest.json"),
+            )
     
     @property
     def name(self) -> str:

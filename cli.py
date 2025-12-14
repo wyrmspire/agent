@@ -111,7 +111,15 @@ async def main():
     
     # Create tool registry
     tools = create_default_registry(config)
-    print(f"[OK] Loaded {tools.count} tools: {', '.join(tools.list())}\n")
+    print(f"[OK] Loaded {tools.count} tools: {', '.join(tools.list())}")
+    
+    # Build chunk index for search_chunks tool (Phase 0.6)
+    chunk_tool = tools.get("search_chunks")
+    if chunk_tool:
+        project_root = str(Path(__file__).parent)
+        chunk_tool.rebuild_index(project_root)
+        stats = chunk_tool.chunk_manager.get_stats()
+        print(f"[OK] Indexed {stats['total_chunks']} code chunks for search")
     
     # Create rule engine
     rules = get_default_engine()

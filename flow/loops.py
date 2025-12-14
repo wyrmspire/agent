@@ -241,6 +241,15 @@ class AgentLoop:
                             role=MessageRole.SYSTEM,
                             content=f"⚠️ Workflow guidance: {judgment.suggestion}",
                         ))
+                    
+                    # Phase 0.7: Check patch discipline for project file changes
+                    patch_judgment = self.judge.check_patch_discipline(state.execution.steps)
+                    if not patch_judgment.passed and patch_judgment.suggestion:
+                        logger.info(f"Patch discipline: {patch_judgment.suggestion}")
+                        state.conversation.add_message(Message(
+                            role=MessageRole.SYSTEM,
+                            content=f"⚠️ Patch protocol: {patch_judgment.suggestion}",
+                        ))
                 
                 # Continue loop to get final answer
                 continue

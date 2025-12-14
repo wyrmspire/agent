@@ -4,6 +4,7 @@ tests/tools/test_patch_tool.py - Tests for patch tools
 Tests the patch creation and management tools.
 """
 
+import pytest
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from tool.patch import CreatePatchTool, ListPatchesTool, GetPatchTool
 from core.patch import PatchManager, PatchStatus
 
 
+@pytest.mark.asyncio
 async def test_create_patch_tool():
     """Test creating a patch via tool."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -33,6 +35,7 @@ async def test_create_patch_tool():
         assert "CANNOT claim this is 'fixed'" in result.output
 
 
+@pytest.mark.asyncio
 async def test_create_patch_tool_missing_fields():
     """Test creating patch with missing required fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -52,6 +55,7 @@ async def test_create_patch_tool_missing_fields():
         assert "PATCH_MISSING_FIELDS" in result.error
 
 
+@pytest.mark.asyncio
 async def test_create_patch_tool_no_targets():
     """Test creating patch without target files."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -71,6 +75,7 @@ async def test_create_patch_tool_no_targets():
         assert "PATCH_NO_TARGETS" in result.error
 
 
+@pytest.mark.asyncio
 async def test_list_patches_tool():
     """Test listing patches via tool."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -106,6 +111,7 @@ async def test_list_patches_tool():
         assert "Patch 2" in result.output
 
 
+@pytest.mark.asyncio
 async def test_list_patches_tool_with_filter():
     """Test listing patches with status filter."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -144,6 +150,7 @@ async def test_list_patches_tool_with_filter():
         assert "Patch 1" not in result.output
 
 
+@pytest.mark.asyncio
 async def test_get_patch_tool():
     """Test getting patch details via tool."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -172,6 +179,7 @@ async def test_get_patch_tool():
         assert "This is the plan" in result.output
 
 
+@pytest.mark.asyncio
 async def test_get_patch_tool_not_found():
     """Test getting non-existent patch."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -185,6 +193,7 @@ async def test_get_patch_tool_not_found():
         assert "PATCH_NOT_FOUND" in result.error
 
 
+@pytest.mark.asyncio
 async def test_get_patch_tool_missing_id():
     """Test getting patch without ID."""
     tool = GetPatchTool()
