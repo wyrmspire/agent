@@ -240,7 +240,19 @@ def calculate_rsi(prices: list[float], period: int = 14) -> list[float]:
 
 ## Testing
 
-Run tests:
+### Quick Health Check
+
+Run the smoke test to verify system health after changes:
+
+```bash
+./smoke_test.sh
+```
+
+This runs 14 checks in <30 seconds to verify core functionality.
+
+### Full Test Suite
+
+Run comprehensive tests:
 
 ```bash
 # Run all tests
@@ -256,9 +268,12 @@ PYTHONPATH=. python tests/tools/test_memory.py
 # Phase 0.4 tests
 PYTHONPATH=. python tests/core/test_skills.py
 PYTHONPATH=. python tests/tools/test_promote_skill.py
+
+# Or use pytest (if installed)
+pytest tests/ -v
 ```
 
-**Test Coverage**: 42 new tests for Phase 0.3 & 0.4, all passing
+**Test Coverage**: 42+ tests for Phase 0.3 & 0.4, all passing
 
 ## Day 1 Acceptance Criteria
 
