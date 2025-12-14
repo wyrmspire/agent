@@ -206,8 +206,12 @@ class Workspace:
         with paths like 'workspace/workspace/test.txt' where 'workspace' is
         a legitimate subfolder name.
         """
+        # Normalize backslashes to forward slashes for consistent parsing
+        # This ensures Windows-style paths work correctly on all platforms
+        normalized = path_str.replace('\\', '/')
+        
         # Convert to Path to properly parse segments
-        path_obj = Path(path_str)
+        path_obj = Path(normalized)
         parts = path_obj.parts
         
         # Only strip if first segment is exactly "workspace"
@@ -259,10 +263,11 @@ class Workspace:
         """Resolve a path within the workspace.
         
         This method takes a relative or absolute path and:
-        1. Strips workspace/ prefix if present (agent may include it)
-        2. Resolves it to an absolute path
-        3. Validates it's within the workspace using path-aware comparison
-        4. Checks it doesn't access blocked directories
+        1. Normalizes backslashes to forward slashes for cross-platform compatibility
+        2. Strips workspace/ prefix if present (agent may include it)
+        3. Resolves it to an absolute path
+        4. Validates it's within the workspace using path-aware comparison
+        5. Checks it doesn't access blocked directories
         
         Args:
             path: Path to resolve (relative to workspace or absolute)
@@ -273,6 +278,11 @@ class Workspace:
         Raises:
             WorkspaceError: If path is outside workspace or blocked
         """
+        # Normalize backslashes to forward slashes for cross-platform compatibility
+        # This ensures Windows-style paths work on all platforms
+        if isinstance(path, str):
+            path = path.replace('\\', '/')
+        
         # Convert to Path object and strip workspace/ prefix
         if isinstance(path, str):
             path = Path(self._strip_workspace_prefix(path))
