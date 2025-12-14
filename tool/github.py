@@ -221,6 +221,24 @@ class GitHubIngest(BaseTool):
                 "Use 'owner/repo' or 'https://github.com/owner/repo'"
             )
     
+    def _is_commit_sha(self, ref: str) -> bool:
+        """Check if ref looks like a commit SHA (Phase 1.7.1).
+        
+        Args:
+            ref: Reference string to check
+            
+        Returns:
+            True if ref appears to be a commit SHA
+        """
+        # SHA heuristic: at least 8 chars, all hex digits
+        if len(ref) < 8:
+            return False
+        try:
+            int(ref, 16)  # Will raise ValueError if not hex
+            return True
+        except ValueError:
+            return False
+    
     def _clone_repo(self, owner: str, repo_name: str, ref: str) -> tuple:
         """Clone repo and return (path, sha).
         
@@ -240,28 +258,82 @@ class GitHubIngest(BaseTool):
         
         logger.info(f"Cloning {url} @ {ref} to {temp_path}")
         
-        # Clone with depth 1 for efficiency
-        # Use --single-branch to only fetch the specified ref
-        clone_cmd = [
-            "git", "clone",
-            "--depth", "1",
-            "--single-branch",
-            "--branch", ref,
-            url,
-            str(temp_path),
-        ]
+        # Detect if ref is a commit SHA (Phase 1.7.1)
+        is_sha = self._is_commit_sha(ref)
         
-        try:
-            subprocess.run(
-                clone_cmd,
-                check=True,
-                capture_output=True,
-                timeout=120,  # 2 minute timeout
-            )
-        except subprocess.TimeoutExpired:
-            if temp_path.exists():
-                shutil.rmtree(temp_path, ignore_errors=True)
-            raise RuntimeError(f"Clone timed out after 120 seconds")
+        if is_sha:
+            # For SHA refs, use init + fetch + checkout flow
+            # This is needed because --branch doesn't work with raw SHAs
+            logger.info(f"Detected SHA ref, using fetch flow")
+            
+            try:
+                # Create empty repo
+                temp_path.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    ["git", "init"],
+                    cwd=temp_path,
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                
+                # Add remote
+                subprocess.run(
+                    ["git", "remote", "add", "origin", url],
+                    cwd=temp_path,
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                
+                # Fetch specific SHA
+                subprocess.run(
+                    ["git", "fetch", "--depth", "1", "origin", ref],
+                    cwd=temp_path,
+                    check=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+                
+                # Checkout FETCH_HEAD
+                subprocess.run(
+                    ["git", "checkout", "FETCH_HEAD"],
+                    cwd=temp_path,
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                
+            except subprocess.TimeoutExpired:
+                if temp_path.exists():
+                    shutil.rmtree(temp_path, ignore_errors=True)
+                raise RuntimeError(f"SHA fetch timed out after 120 seconds")
+            except subprocess.CalledProcessError as e:
+                if temp_path.exists():
+                    shutil.rmtree(temp_path, ignore_errors=True)
+                raise
+        else:
+            # For branch/tag refs, use fast clone path
+            clone_cmd = [
+                "git", "clone",
+                "--depth", "1",
+                "--single-branch",
+                "--branch", ref,
+                url,
+                str(temp_path),
+            ]
+            
+            try:
+                subprocess.run(
+                    clone_cmd,
+                    check=True,
+                    capture_output=True,
+                    timeout=120,  # 2 minute timeout
+                )
+            except subprocess.TimeoutExpired:
+                if temp_path.exists():
+                    shutil.rmtree(temp_path, ignore_errors=True)
+                raise RuntimeError(f"Clone timed out after 120 seconds")
         
         # Get actual SHA
         result = subprocess.run(
