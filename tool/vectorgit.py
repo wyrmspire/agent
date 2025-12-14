@@ -106,7 +106,8 @@ class VectorGit:
             
             # Prune stale vectors
             current_ids = list(self.chunk_manager.chunks.keys())
-            self.vector_store.prune(current_ids)
+            if self.vector_store.prune(current_ids):
+                self.vector_store.save()
             
             # Find chunks that are missing from vector store
             ids_to_embed = []

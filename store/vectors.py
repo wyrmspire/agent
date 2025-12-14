@@ -116,16 +116,16 @@ class VectorStore:
 
     def missing(self, ids: List[str]) -> List[str]:
         """Return list of IDs that are missing from store."""
-        return [idx for idx in ids if idx not in self.id_to_index]
+        return [cid for cid in ids if cid not in self.id_to_index]
 
-    def prune(self, active_ids: List[str]):
-        """Remove chunks not present in the active_ids list."""
+    def prune(self, active_ids: List[str]) -> bool:
+        """Remove chunks not present in the active_ids list. Returns True if changed."""
         if self.vectors is None:
-            return
+            return False
             
         active_set = set(active_ids)
         if len(active_set) == len(self.chunk_ids):
-            return # No changes needed
+            return False # No changes needed
             
         # Filter
         indices_to_keep = []
@@ -137,7 +137,7 @@ class VectorStore:
                 new_ids.append(cid)
                 
         if len(new_ids) == len(self.chunk_ids):
-            return
+            return False
             
         # Update state
         self.chunk_ids = new_ids
@@ -147,9 +147,10 @@ class VectorStore:
         self.id_to_index = {cid: i for i, cid in enumerate(self.chunk_ids)}
         self.metadata["count"] = len(self.chunk_ids)
         logger.info(f"Pruned active vectors to {len(self.chunk_ids)}")
+        return True
 
     def add(self, chunk_ids: List[str], embeddings: List[List[float]], model_name: str = "unknown"):
-        """Add new embeddings to the store.
+        """Add new embeddings to the store. Updates existing IDs in-place.
         
         Args:
             chunk_ids: List of Chunk IDs
@@ -172,7 +173,6 @@ class VectorStore:
             self.metadata["embedding_model"] = model_name
         elif self.metadata["embedding_model"] != model_name:
              logger.warning(f"Model mismatch: existing={self.metadata['embedding_model']}, new={model_name}")
-             # We allow it, but warn. ideally we'd separate stores.
         
         if self.metadata["dim"] == 0:
             self.metadata["dim"] = dim
@@ -182,18 +182,36 @@ class VectorStore:
         norms[norms == 0] = 1.0  # Avoid division by zero
         new_vecs = new_vecs / norms
         
-        # Append
+        # Initialize if empty
         if self.vectors is None:
             self.vectors = new_vecs
             self.chunk_ids = list(chunk_ids)
-        else:
-            self.vectors = np.concatenate([self.vectors, new_vecs])
-            self.chunk_ids.extend(chunk_ids)
+            self.id_to_index = {cid: i for i, cid in enumerate(self.chunk_ids)}
+            return
             
-        # Rebuild index map (append)
-        start_idx = len(self.chunk_ids) - len(chunk_ids)
+        # Separate updates vs appends
+        to_append_vecs = []
+        to_append_ids = []
+        
         for i, cid in enumerate(chunk_ids):
-            self.id_to_index[cid] = start_idx + i
+            if cid in self.id_to_index:
+                # Update in-place
+                idx = self.id_to_index[cid]
+                self.vectors[idx] = new_vecs[i]
+            else:
+                # Queue for append
+                to_append_ids.append(cid)
+                to_append_vecs.append(new_vecs[i])
+        
+        # Process appends
+        if to_append_ids:
+             to_append_arr = np.stack(to_append_vecs, axis=0)
+             self.vectors = np.concatenate([self.vectors, to_append_arr])
+             
+             start_idx = len(self.chunk_ids)
+             self.chunk_ids.extend(to_append_ids)
+             for i, cid in enumerate(to_append_ids):
+                 self.id_to_index[cid] = start_idx + i
             
     def search(self, query_vec: List[float], k: int = 10) -> List[Tuple[str, float]]:
         """Search for similar vectors with deterministic tie-breaking.
