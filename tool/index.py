@@ -128,6 +128,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
     from .memory import MemoryTool
     from .chunk_search import ChunkSearchTool
     from .patch import CreatePatchTool, ListPatchesTool, GetPatchTool
+    from .queue import QueueAddTool, QueueNextTool, QueueDoneTool, QueueFailTool
     
     # Default to all enabled if no config provided
     if config is None:
@@ -140,6 +141,7 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             "enable_memory": True,
             "enable_chunk_search": True,
             "enable_patch": True,
+            "enable_queue": True,
         }
     
     registry = ToolRegistry()
@@ -178,6 +180,13 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
         registry.register(CreatePatchTool())
         registry.register(ListPatchesTool())
         registry.register(GetPatchTool())
+    
+    # Queue tools (Phase 0.8B)
+    if config.get("enable_queue", True):
+        registry.register(QueueAddTool())
+        registry.register(QueueNextTool())
+        registry.register(QueueDoneTool())
+        registry.register(QueueFailTool())
     
     # Skill management tool (Phase 0.4)
     if config.get("enable_promote_skill", True):
