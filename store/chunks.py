@@ -15,9 +15,10 @@ Responsibilities:
 import hashlib
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -62,6 +63,10 @@ class ChunkManager:
         self.source_to_chunks: Dict[str, List[str]] = {}  # source_path -> [chunk_ids] for stale detection
         self.stale_chunk_ids: List[str] = []  # IDs replaced on last ingest
         
+        # Phase 1.2: Inverted index for O(1) keyword search
+        self.inverted_index: Dict[str, List[str]] = {}  # token -> [chunk_ids]
+        self.index_dirty = False  # Track if index needs rebuilding
+        
         # Create directories
         self.chunks_dir.mkdir(parents=True, exist_ok=True)
         
@@ -73,6 +78,62 @@ class ChunkManager:
             if re.search(pattern, path, re.IGNORECASE):
                 return True
         return False
+    
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize text for inverted index (Phase 1.2).
+        
+        Args:
+            text: Text to tokenize
+            
+        Returns:
+            List of lowercase tokens
+        """
+        # Simple tokenization: lowercase, split on non-alphanumeric
+        # Also split on underscores for better search
+        text_lower = text.lower()
+        # Replace underscores with spaces first
+        text_lower = text_lower.replace('_', ' ')
+        tokens = re.findall(r'\w+', text_lower)
+        return tokens
+    
+    def _build_inverted_index(self) -> None:
+        """Build inverted index from all chunks (Phase 1.2)."""
+        logger.info("Building inverted index...")
+        self.inverted_index = {}
+        
+        for chunk_id, chunk_meta in self.chunks.items():
+            # Load content
+            content = self._load_content(chunk_id)
+            if not content:
+                continue
+            
+            # Tokenize and index
+            tokens = self._tokenize(content)
+            unique_tokens = set(tokens)
+            
+            for token in unique_tokens:
+                if token not in self.inverted_index:
+                    self.inverted_index[token] = []
+                self.inverted_index[token].append(chunk_id)
+        
+        self.index_dirty = False
+        logger.info(f"Inverted index built: {len(self.inverted_index)} unique tokens")
+    
+    def _update_inverted_index(self, chunk_id: str, content: str) -> None:
+        """Update inverted index for a single chunk (Phase 1.2).
+        
+        Args:
+            chunk_id: Chunk ID to index
+            content: Chunk content
+        """
+        tokens = self._tokenize(content)
+        unique_tokens = set(tokens)
+        
+        for token in unique_tokens:
+            if token not in self.inverted_index:
+                self.inverted_index[token] = []
+            if chunk_id not in self.inverted_index[token]:
+                self.inverted_index[token].append(chunk_id)
     
     def _hash_content(self, content: str) -> str:
         return hashlib.sha256(content.encode()).hexdigest()[:16]
@@ -136,7 +197,7 @@ class ChunkManager:
             end_line=end,
             hash=chunk_hash,
             tags=["python", ctype or "code"],
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             chunk_type=ctype or "section",
             name=name,
         ))
@@ -163,7 +224,7 @@ class ChunkManager:
                 end_line=end,
                 hash=chunk_hash,
                 tags=["markdown", "section"],
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
                 chunk_type="section",
                 name=name,
             ))
@@ -197,7 +258,7 @@ class ChunkManager:
             end_line=len(lines),
             hash=chunk_hash,
             tags=[ext.lstrip("."), "file"],
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             chunk_type="file",
             name=None,
         )
@@ -253,6 +314,10 @@ class ChunkManager:
                 content_to_save = self.chunk_content_cache.get(chunk.id, "")
                 self._persist_chunk_content(chunk.id, content_to_save)
                 
+                # Phase 1.2: Update inverted index for new chunk
+                if content_to_save:
+                    self._update_inverted_index(chunk.id, content_to_save)
+                
                 new_count += 1
             
             # Update source mapping
@@ -268,6 +333,9 @@ class ChunkManager:
                         stale_chunk = self.chunks.pop(stale_id)
                         if stale_chunk.hash in self.hashes:
                             del self.hashes[stale_chunk.hash]
+                # Phase 1.2: Mark index as dirty when chunks are removed
+                if stale_ids:
+                    self.index_dirty = True
                 logger.info(f"Marked {len(stale_ids)} chunks as stale from {file_path}")
             
             logger.info(f"Ingested {new_count} new chunks from {file_path}")
@@ -293,27 +361,62 @@ class ChunkManager:
 
 
     def search_chunks(self, query: str, k: int = 10, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Search chunks using inverted index (Phase 1.2) or fallback to linear scan.
+        
+        Args:
+            query: Search query
+            k: Number of results to return
+            filters: Optional filters for path_prefix, file_type, chunk_type
+            
+        Returns:
+            List of matching chunks with metadata and content
+        """
         filters = filters or {}
-        results = []
         query_lower = query.lower()
         
-        # Iterate all chunks
-        # Optimization: In real system, we'd use an index. Here we scan.
-        for chunk_id, chunk_meta in self.chunks.items():
-            # Filters
-            if filters.get("path_prefix") and not chunk_meta.source_path.startswith(filters["path_prefix"]): continue
-            if filters.get("file_type") and not chunk_meta.source_path.endswith(filters["file_type"]): continue
-            if filters.get("chunk_type") and chunk_meta.chunk_type != filters["chunk_type"]: continue
+        # Phase 1.2: Use inverted index if available
+        if self.inverted_index and not self.index_dirty:
+            candidate_ids = self._search_inverted_index(query_lower)
+        else:
+            # Fallback: all chunks
+            candidate_ids = list(self.chunks.keys())
+            # Build index for future searches if it's dirty
+            if self.index_dirty or not self.inverted_index:
+                self._build_inverted_index()
+        
+        results = []
+        for chunk_id in candidate_ids:
+            if chunk_id not in self.chunks:
+                continue
+                
+            chunk_meta = self.chunks[chunk_id]
             
-            # Lazy load for content check
-            # NOTE: iterating all files and reading disk is slow. 
-            # ideally search_chunks is ONLY used for small workspaces or keyword search is optimized.
-            # For 0.9A, we assume workspace fits in FS cache or is small.
+            # Apply filters
+            if filters.get("path_prefix") and not chunk_meta.source_path.startswith(filters["path_prefix"]): 
+                continue
+            if filters.get("file_type") and not chunk_meta.source_path.endswith(filters["file_type"]): 
+                continue
+            if filters.get("chunk_type") and chunk_meta.chunk_type != filters["chunk_type"]: 
+                continue
+            
+            # Load content and verify match
             chunk_data = self.get_chunk(chunk_id)
-            if not chunk_data: continue
+            if not chunk_data: 
+                continue
             
             content = chunk_data["content"]
-            if query_lower in content.lower():
+            content_lower = content.lower()
+            
+            # Phase 1.2: For inverted index results, verify all query tokens are present
+            # For non-index results, check substring match
+            if candidate_ids != list(self.chunks.keys()):  # Using index
+                # Already verified by index, all tokens present
+                match = True
+            else:
+                # Fallback: substring match
+                match = query_lower in content_lower
+            
+            if match:
                 results.append({
                     "chunk_id": chunk_id,
                     "source_path": chunk_meta.source_path,
@@ -328,6 +431,39 @@ class ChunkManager:
         # Deterministic sorting: Count desc, Path asc, Line asc
         results.sort(key=lambda x: (-x["content"].lower().count(query_lower), x["source_path"], x["start_line"]))
         return results[:k]
+    
+    def _search_inverted_index(self, query: str) -> List[str]:
+        """Search inverted index for query tokens (Phase 1.2).
+        
+        Args:
+            query: Lowercase query string
+            
+        Returns:
+            List of candidate chunk IDs
+        """
+        tokens = self._tokenize(query)
+        if not tokens:
+            return []
+        
+        # Get chunk IDs for each token
+        token_results = []
+        for token in tokens:
+            if token in self.inverted_index:
+                token_results.append(set(self.inverted_index[token]))
+        
+        if not token_results:
+            return []
+        
+        # Intersect results for multi-word queries (AND logic)
+        if len(token_results) == 1:
+            return list(token_results[0])
+        
+        # Find intersection of all token results
+        result_set = token_results[0]
+        for token_set in token_results[1:]:
+            result_set = result_set.intersection(token_set)
+        
+        return list(result_set)
 
     def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
         if chunk_id not in self.chunks:
@@ -402,20 +538,36 @@ class ChunkManager:
         }
     
     def save_manifest(self) -> bool:
+        """Save manifest using atomic write (Phase 1.3)."""
         try:
             self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
-                "version": "0.9A",
+                "version": "1.3",  # Updated for Phase 1.3
                 "chunk_count": len(self.chunks),
-                "last_updated": datetime.utcnow().isoformat(),
+                "last_updated": datetime.now(timezone.utc).isoformat(),
                 "chunks": [asdict(chunk) for chunk in self.chunks.values()],
                 "source_to_chunks": self.source_to_chunks,  # v1.1: persist for stale detection
             }
-            with open(self.manifest_path, "w") as f:
+            
+            # Phase 1.3: Atomic write
+            manifest_tmp = Path(str(self.manifest_path) + '.tmp')
+            with open(manifest_tmp, "w") as f:
                 json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            
+            # Atomic replace
+            os.replace(manifest_tmp, self.manifest_path)
             return True
         except Exception as e:
             logger.error(f"Failed to save manifest: {e}")
+            # Clean up temp file if it exists
+            try:
+                manifest_tmp = Path(str(self.manifest_path) + '.tmp')
+                if manifest_tmp.exists():
+                    manifest_tmp.unlink()
+            except:
+                pass
             return False
 
     def _load_manifest(self) -> bool:

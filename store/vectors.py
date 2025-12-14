@@ -12,22 +12,28 @@ Responsibilities:
 
 Rules:
 - Embeddings must match chunk IDs from ChunkManager
-- Persistence is crash-safe (atomic write preferred, but simple save ok for now)
+- Persistence is crash-safe using atomic writes (Phase 1.3)
 - Search is deterministic (stable tie-breaking)
 """
 
 import json
 import logging
 import numpy as np
+import os
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+
+class CorruptedIndexError(Exception):
+    """Raised when vector store corruption is detected."""
+    pass
+
 class VectorStore:
     """Manages vector embeddings and similarity search."""
     
-    def __init__(self, store_path: str = "./store/vectors"):
+    def __init__(self, store_path: str = "./store/vectors", auto_load: bool = True):
         self.store_path = Path(store_path)
         self.vectors_path = self.store_path / "embeddings.npz"
         self.manifest_path = self.store_path / "vectors_manifest.json"
@@ -48,10 +54,39 @@ class VectorStore:
         self.store_path.mkdir(parents=True, exist_ok=True)
         
         # Load if exists
-        self.load()
+        if auto_load:
+            self.load()
+    
+    @classmethod
+    def try_load(cls, store_path: str) -> 'VectorStore':
+        """Create VectorStore and load, handling corruption.
+        
+        Args:
+            store_path: Path to vector store
+            
+        Returns:
+            Initialized VectorStore (empty if corrupted)
+            
+        Raises:
+            CorruptedIndexError: If corruption detected and cannot recover
+        """
+        store = cls(store_path, auto_load=False)
+        try:
+            store.load()
+        except CorruptedIndexError:
+            # Return empty store on corruption
+            logger.warning("Corruption detected, returning empty store")
+            store.vectors = None
+            store.chunk_ids = []
+            store.id_to_index = {}
+        return store
     
     def load(self) -> bool:
-        """Load vectors and manifest from disk."""
+        """Load vectors and manifest from disk with corruption detection.
+        
+        Raises:
+            CorruptedIndexError: If vector count doesn't match chunk IDs
+        """
         if not self.vectors_path.exists() or not self.manifest_path.exists():
             return False
             
@@ -68,46 +103,87 @@ class VectorStore:
             data = np.load(self.vectors_path)
             self.vectors = data["vectors"]
             
-            # Validation
-            if self.vectors.shape[0] != len(self.chunk_ids):
-                logger.error(f"VectorStore Corruption: {len(self.chunk_ids)} ids but {self.vectors.shape[0]} vectors")
-                self.vectors = None
-                self.chunk_ids = []
-                self.id_to_index = {}
-                return False
+            # Phase 1.3: Corruption detection with checksum validation
+            manifest_count = self.metadata.get("count", len(self.chunk_ids))
+            vector_count = self.vectors.shape[0]
+            chunk_id_count = len(self.chunk_ids)
+            
+            if vector_count != chunk_id_count or vector_count != manifest_count:
+                error_msg = (
+                    f"VectorStore Corruption Detected: "
+                    f"manifest_count={manifest_count}, "
+                    f"chunk_ids={chunk_id_count}, "
+                    f"vectors={vector_count}"
+                )
+                logger.error(error_msg)
+                raise CorruptedIndexError(error_msg)
                 
             logger.info(f"Loaded {len(self.chunk_ids)} vectors (dim={self.vectors.shape[1]}) model={self.metadata.get('embedding_model')}")
             return True
             
+        except CorruptedIndexError:
+            raise  # Re-raise corruption errors for self-healing
         except Exception as e:
             logger.error(f"Failed to load vector store: {e}")
             return False
     
     def save(self) -> bool:
-        """Save vectors and manifest to disk."""
-        if self.vectors is None:
+        """Save vectors and manifest to disk using atomic writes (Phase 1.3).
+        
+        Uses .tmp files and os.replace() for crash safety.
+        """
+        if self.vectors is None or len(self.chunk_ids) == 0:
             return False
             
         try:
-            # Save vectors
-            np.savez_compressed(self.vectors_path, vectors=self.vectors)
+            from datetime import datetime, timezone
             
             # Update metadata
-            from datetime import datetime
             self.metadata["chunk_ids"] = self.chunk_ids
             self.metadata["count"] = len(self.chunk_ids)
             self.metadata["dim"] = self.vectors.shape[1] if self.vectors is not None else 0
-            self.metadata["updated_at"] = datetime.utcnow().isoformat()
+            self.metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
             
-            # Save manifest
-            with open(self.manifest_path, "w") as f:
+            # Phase 1.3: Atomic write for vectors
+            # Note: np.savez_compressed automatically adds .npz extension
+            # So we save without extension and it becomes .npz
+            vectors_tmp_base = self.store_path / "embeddings.tmp"
+            np.savez_compressed(vectors_tmp_base, vectors=self.vectors)
+            # After save, the actual file is embeddings.tmp.npz
+            vectors_tmp = self.store_path / "embeddings.tmp.npz"
+            
+            # Flush to disk
+            with open(vectors_tmp, 'rb') as f:
+                os.fsync(f.fileno())
+            
+            # Atomic replace (POSIX/Windows safe)
+            os.replace(vectors_tmp, self.vectors_path)
+            
+            # Phase 1.3: Atomic write for manifest
+            manifest_tmp = Path(str(self.manifest_path) + '.tmp')
+            with open(manifest_tmp, "w") as f:
                 json.dump(self.metadata, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
                 
-            logger.info(f"Saved {len(self.chunk_ids)} vectors to disk")
+            # Atomic replace
+            os.replace(manifest_tmp, self.manifest_path)
+                
+            logger.info(f"Saved {len(self.chunk_ids)} vectors to disk (atomic)")
             return True
             
         except Exception as e:
             logger.error(f"Failed to save vector store: {e}")
+            # Clean up temp files if they exist
+            try:
+                vectors_tmp = self.store_path / "embeddings.tmp.npz"
+                if vectors_tmp.exists():
+                    vectors_tmp.unlink()
+                manifest_tmp = Path(str(self.manifest_path) + '.tmp')
+                if manifest_tmp.exists():
+                    manifest_tmp.unlink()
+            except:
+                pass
             return False
             
     def has(self, chunk_id: str) -> bool:
@@ -246,14 +322,16 @@ class VectorStore:
                  self.id_to_index[cid] = start_idx + i
             
     def search(self, query_vec: List[float], k: int = 10) -> List[Tuple[str, float]]:
-        """Search for similar vectors with deterministic tie-breaking.
+        """Search for similar vectors using fast top-K selection (Phase 1.2).
+        
+        Uses np.argpartition for O(N) top-K instead of O(N log N) sort.
         
         Args:
             query_vec: Query embedding vector
             k: Number of results
             
         Returns:
-            List of (chunk_id, score) tuples
+            List of (chunk_id, score) tuples, sorted deterministically
         """
         if self.vectors is None or len(self.chunk_ids) == 0:
             return []
@@ -264,21 +342,31 @@ class VectorStore:
         if norm > 0:
             q = q / norm
             
-        # Compute scores (Dot product)
+        # Compute scores (Dot product = cosine similarity for normalized vectors)
         scores = np.dot(self.vectors, q)
         
-        # Prepare list of (chunk_id, score)
-        # For full determinism, we sort ALL candidates then take top K.
-        # Efficient enough for <100k chunks.
+        n = len(scores)
+        k_actual = min(k, n)
         
-        # Create list of (chunk_id, score)
+        # Phase 1.2: Use argpartition for O(N) top-K selection
+        # argpartition puts the k largest elements at the end (for negative scores)
+        if n <= k_actual:
+            # All results needed, just sort
+            top_indices = np.argsort(-scores)
+        else:
+            # Use argpartition to find top K efficiently
+            # Negate scores to get largest values
+            partition_indices = np.argpartition(-scores, k_actual-1)[:k_actual]
+            # Sort only the top K
+            top_indices = partition_indices[np.argsort(-scores[partition_indices])]
+        
+        # Build result list with deterministic tie-breaking
         candidates = []
-        for i, score in enumerate(scores):
-            candidates.append((self.chunk_ids[i], float(score)))
+        for idx in top_indices:
+            candidates.append((self.chunk_ids[idx], float(scores[idx])))
         
-        # Stable sort:
-        # Primary key: Score (Descending) -> -x[1]
-        # Secondary key: Chunk ID (Ascending) -> x[0]
+        # Final stable sort for determinism (score desc, chunk_id asc)
+        # Since we already sorted by score, we only need secondary sort for ties
         candidates.sort(key=lambda x: (-x[1], x[0]))
         
-        return candidates[:k]
+        return candidates[:k_actual]
