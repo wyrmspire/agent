@@ -104,10 +104,19 @@ class VectorGit:
         if gateway and count > 0:
             logger.info("Computing embeddings for clean chunks...")
             
-            # Prune stale vectors
+            
+            # Prune stale vectors (global prune for removed files)
             current_ids = list(self.chunk_manager.chunks.keys())
             if self.vector_store.prune(current_ids):
                 self.vector_store.save()
+            
+            # Remove stale embeddings from modified files
+            stale_ids = self.chunk_manager.stale_chunk_ids
+            if stale_ids:
+                if self.vector_store.remove_ids(stale_ids):
+                    self.vector_store.save()
+                # Clear stale list after processing
+                self.chunk_manager.stale_chunk_ids = []
             
             # Find chunks that are missing from vector store
             ids_to_embed = []

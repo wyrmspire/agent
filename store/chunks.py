@@ -59,6 +59,8 @@ class ChunkManager:
         self.chunks: Dict[str, ChunkMetadata] = {}
         self.hashes: Dict[str, str] = {} # hash -> chunk_id map for O(1) dedupe
         self.chunk_content_cache: Dict[str, str] = {} # Optional memory cache
+        self.source_to_chunks: Dict[str, List[str]] = {}  # source_path -> [chunk_ids] for stale detection
+        self.stale_chunk_ids: List[str] = []  # IDs replaced on last ingest
         
         # Create directories
         self.chunks_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +206,9 @@ class ChunkManager:
     def ingest_file(self, file_path: str) -> int:
         try:
             path = Path(file_path)
-            if not path.exists() or self._is_sensitive(str(path)):
+            source_path = str(path.resolve())  # Normalize to absolute for consistency
+            
+            if not path.exists() or self._is_sensitive(source_path):
                 return 0
             if path.suffix not in self.SUPPORTED_EXTENSIONS:
                 return 0
@@ -212,21 +216,36 @@ class ChunkManager:
             content = path.read_text(encoding="utf-8")
             
             if path.suffix == ".py":
-                chunks = self._chunk_python_file(content, str(path))
+                chunks = self._chunk_python_file(content, source_path)
             elif path.suffix == ".md":
-                chunks = self._chunk_markdown_file(content, str(path))
+                chunks = self._chunk_markdown_file(content, source_path)
             else:
-                chunks = self._chunk_generic_file(content, str(path))
+                chunks = self._chunk_generic_file(content, source_path)
+            
+            # Get old chunk IDs for this source (for stale detection)
+            old_chunk_ids = set(self.source_to_chunks.get(source_path, []))
+            new_chunk_ids = []
             
             new_count = 0
             for chunk in chunks:
-                # O(1) Check
+                # O(1) Check for duplicate content
                 if chunk.hash in self.hashes:
-                    # Duplicate content.
-                    # We could update metadata (source_path) here if needed.
+                    # Duplicate content - use existing ID, update metadata
+                    existing_id = self.hashes[chunk.hash]
+                    new_chunk_ids.append(existing_id)
+                    
+                    # Update metadata to reflect latest location
+                    if existing_id in self.chunks:
+                        existing = self.chunks[existing_id]
+                        existing.source_path = chunk.source_path
+                        existing.start_line = chunk.start_line
+                        existing.end_line = chunk.end_line
+                        existing.chunk_type = chunk.chunk_type
+                        existing.name = chunk.name
                     continue
                 
                 # New chunk
+                new_chunk_ids.append(chunk.id)
                 self.chunks[chunk.id] = chunk
                 self.hashes[chunk.hash] = chunk.id
                 
@@ -236,6 +255,21 @@ class ChunkManager:
                 
                 new_count += 1
             
+            # Update source mapping
+            self.source_to_chunks[source_path] = new_chunk_ids
+            
+            # Detect stale chunks (old IDs not in new set)
+            stale_ids = old_chunk_ids - set(new_chunk_ids)
+            if stale_ids:
+                self.stale_chunk_ids.extend(stale_ids)
+                # Remove stale chunks from memory
+                for stale_id in stale_ids:
+                    if stale_id in self.chunks:
+                        stale_chunk = self.chunks.pop(stale_id)
+                        if stale_chunk.hash in self.hashes:
+                            del self.hashes[stale_chunk.hash]
+                logger.info(f"Marked {len(stale_ids)} chunks as stale from {file_path}")
+            
             logger.info(f"Ingested {new_count} new chunks from {file_path}")
             return new_count
         except Exception as e:
@@ -243,6 +277,9 @@ class ChunkManager:
             return 0
 
     def ingest_directory(self, directory: str, recursive: bool = True) -> int:
+        # Clear stale IDs at start of directory ingest
+        self.stale_chunk_ids = []
+        
         total_chunks = 0
         dir_path = Path(directory)
         if not dir_path.exists():
@@ -253,6 +290,7 @@ class ChunkManager:
             if file_path.is_file():
                 total_chunks += self.ingest_file(str(file_path))
         return total_chunks
+
 
     def search_chunks(self, query: str, k: int = 10, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         filters = filters or {}
@@ -344,10 +382,11 @@ class ChunkManager:
         try:
             self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
-                "version": "1.0",
+                "version": "0.9A",
                 "chunk_count": len(self.chunks),
                 "last_updated": datetime.utcnow().isoformat(),
                 "chunks": [asdict(chunk) for chunk in self.chunks.values()],
+                "source_to_chunks": self.source_to_chunks,  # v1.1: persist for stale detection
             }
             with open(self.manifest_path, "w") as f:
                 json.dump(data, f, indent=2)
@@ -364,6 +403,7 @@ class ChunkManager:
                 data = json.load(f)
             self.chunks = {}
             self.hashes = {}
+            self.source_to_chunks = data.get("source_to_chunks", {})  # v1.1: load for stale detection
             for chunk_data in data.get("chunks", []):
                 chunk = ChunkMetadata(**chunk_data)
                 self.chunks[chunk.id] = chunk

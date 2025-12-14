@@ -149,6 +149,38 @@ class VectorStore:
         logger.info(f"Pruned active vectors to {len(self.chunk_ids)}")
         return True
 
+    def remove_ids(self, ids_to_remove: List[str]) -> bool:
+        """Remove specific chunk IDs from store.
+        
+        Args:
+            ids_to_remove: List of chunk IDs to remove
+            
+        Returns:
+            True if any were removed
+        """
+        if not ids_to_remove or self.vectors is None:
+            return False
+            
+        remove_set = set(ids_to_remove)
+        indices_to_keep = []
+        new_ids = []
+        
+        for i, cid in enumerate(self.chunk_ids):
+            if cid not in remove_set:
+                indices_to_keep.append(i)
+                new_ids.append(cid)
+        
+        if len(new_ids) == len(self.chunk_ids):
+            return False  # Nothing removed
+        
+        old_count = len(self.chunk_ids)
+        self.chunk_ids = new_ids
+        self.vectors = self.vectors[indices_to_keep]
+        self.id_to_index = {cid: i for i, cid in enumerate(self.chunk_ids)}
+        self.metadata["count"] = len(self.chunk_ids)
+        logger.info(f"Removed {old_count - len(new_ids)} stale embeddings")
+        return True
+
     def add(self, chunk_ids: List[str], embeddings: List[List[float]], model_name: str = "unknown"):
         """Add new embeddings to the store. Updates existing IDs in-place.
         
