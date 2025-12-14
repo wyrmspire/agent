@@ -121,6 +121,29 @@ class Workspace:
         """Get the base path of the workspace (alias for root)."""
         return self.root
     
+    def _normalize_path(self, p: Path) -> Path:
+        """Normalize path for cross-platform comparison.
+        
+        Resolves symlinks, normalizes case on Windows, and converts to absolute.
+        This ensures consistent comparison regardless of slash direction or case.
+        """
+        resolved = p.resolve()
+        # On Windows, normalize case for comparison
+        if os.name == 'nt':
+            return Path(os.path.normcase(str(resolved)))
+        return resolved
+    
+    def _strip_workspace_prefix(self, path_str: str) -> str:
+        """Strip workspace/ prefix if agent included it.
+        
+        The agent sees 'workspace/' in project listings and may include it.
+        """
+        if path_str.startswith("workspace/"):
+            return path_str[len("workspace/"):]
+        elif path_str.startswith("workspace\\"):
+            return path_str[len("workspace\\"):]
+        return path_str
+    
     def _is_sensitive_file(self, path: Path) -> bool:
         """Check if a file matches sensitive patterns."""
         name = path.name.lower()
@@ -159,9 +182,10 @@ class Workspace:
         """Resolve a path within the workspace.
         
         This method takes a relative or absolute path and:
-        1. Resolves it to an absolute path
-        2. Validates it's within the workspace
-        3. Checks it doesn't access blocked directories
+        1. Strips workspace/ prefix if present (agent may include it)
+        2. Resolves it to an absolute path
+        3. Validates it's within the workspace using path-aware comparison
+        4. Checks it doesn't access blocked directories
         
         Args:
             path: Path to resolve (relative to workspace or absolute)
@@ -172,9 +196,9 @@ class Workspace:
         Raises:
             WorkspaceError: If path is outside workspace or blocked
         """
-        # Convert to Path object
+        # Convert to Path object and strip workspace/ prefix
         if isinstance(path, str):
-            path = Path(path)
+            path = Path(self._strip_workspace_prefix(path))
         
         # If path is relative, make it relative to workspace root
         if not path.is_absolute():
@@ -186,12 +210,19 @@ class Workspace:
         except (OSError, RuntimeError) as e:
             raise WorkspaceError(f"Cannot resolve path: {e}")
         
-        # Check if path is within workspace
+        # Check if path is within workspace using path-aware comparison
+        # Use normalized paths for Windows case-insensitivity
+        resolved_norm = self._normalize_path(resolved)
+        workspace_norm = self._normalize_path(self.root)
+        
         try:
-            resolved.relative_to(self.root)
+            resolved_norm.relative_to(workspace_norm)
         except ValueError:
             raise WorkspaceError(
-                f"[blocked_by: workspace] Path '{path}' is outside workspace (must be within {self.root})"
+                f"[blocked_by: workspace] Path outside workspace\n"
+                f"  requested: {path}\n"
+                f"  resolved: {resolved}\n"
+                f"  workspace_root: {self.root}"
             )
         
         # Workspace paths don't need blocked dir checks (they're already in workspace)
@@ -235,12 +266,18 @@ class Workspace:
         except (OSError, RuntimeError) as e:
             raise WorkspaceError(f"Cannot resolve path: {e}")
         
-        # Check if path is within project
+        # Check if path is within project using normalized comparison
+        resolved_norm = self._normalize_path(resolved)
+        project_norm = self._normalize_path(self._project_root)
+        
         try:
-            resolved.relative_to(self._project_root)
+            resolved_norm.relative_to(project_norm)
         except ValueError:
             raise WorkspaceError(
-                f"[blocked_by: workspace] Path '{path}' is outside project (must be within {self._project_root})"
+                f"[blocked_by: workspace] Path outside project\n"
+                f"  requested: {path}\n"
+                f"  resolved: {resolved}\n"
+                f"  project_root: {self._project_root}"
             )
         
         # Check if path is a blocked file
