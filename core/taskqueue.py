@@ -20,7 +20,7 @@ Rules:
 import json
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -184,7 +184,7 @@ class TaskQueue:
             Task ID of the created task
         """
         # Generate deterministic task ID
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         task_id = f"task_{len(self._tasks) + 1:04d}"
         
         task = TaskPacket(
@@ -220,7 +220,7 @@ class TaskQueue:
             if task.status == TaskStatus.QUEUED:
                 # Mark as running
                 task.status = TaskStatus.RUNNING
-                task.updated_at = datetime.utcnow().isoformat()
+                task.updated_at = datetime.now(timezone.utc).isoformat()
                 self._update_task(task)
                 
                 logger.info(f"Starting task {task.task_id}")
@@ -249,7 +249,7 @@ class TaskQueue:
         
         task = self._tasks[task_id]
         task.status = TaskStatus.DONE
-        task.updated_at = datetime.utcnow().isoformat()
+        task.updated_at = datetime.now(timezone.utc).isoformat()
         self._update_task(task)
         
         # Save checkpoint if provided
@@ -281,7 +281,7 @@ class TaskQueue:
         
         task = self._tasks[task_id]
         task.status = TaskStatus.FAILED
-        task.updated_at = datetime.utcnow().isoformat()
+        task.updated_at = datetime.now(timezone.utc).isoformat()
         task.metadata['error'] = error
         self._update_task(task)
         
@@ -386,7 +386,7 @@ class TaskQueue:
                 what_next="See checkpoint file",
                 blockers=[],
                 citations=[],
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
         
         except Exception as e:

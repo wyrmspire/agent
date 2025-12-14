@@ -17,6 +17,7 @@ Rules:
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from core.types import ToolResult
@@ -311,7 +312,6 @@ class QueueDoneTool(BaseTool):
             citations = arguments.get("citations", [])
             
             # Create checkpoint
-            from datetime import datetime
             checkpoint = Checkpoint(
                 task_id=task_id,
                 what_was_done=what_was_done,
@@ -319,7 +319,7 @@ class QueueDoneTool(BaseTool):
                 what_next=what_next,
                 blockers=[],
                 citations=citations,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
             
             # Mark task as done
@@ -447,7 +447,6 @@ class QueueFailTool(BaseTool):
             citations = arguments.get("citations", [])
             
             # Create checkpoint
-            from datetime import datetime
             checkpoint = Checkpoint(
                 task_id=task_id,
                 what_was_done=what_was_done,
@@ -455,7 +454,7 @@ class QueueFailTool(BaseTool):
                 what_next="Review errors and retry or create subtasks",
                 blockers=blockers,
                 citations=citations,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
             
             # Mark task as failed
