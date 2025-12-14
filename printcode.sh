@@ -2,11 +2,11 @@
 
 # Configuration
 # Add directories to ignore here.
-IGNORE_DIRS=("node_modules" ".next" ".git" "__pycache__" "venv" ".venv" "env" "dist" "build" "coverage" ".pytest_cache" "tmp" "temp" ".vscode" ".idea" "target" "bin" "obj")
+IGNORE_DIRS=("node_modules" ".next" ".git" "__pycache__" "venv" ".venv" "env" "dist" "build" "coverage" ".pytest_cache" "tmp" "temp" ".vscode" ".idea" "target" "bin" "obj" "workspace" "logs")
 IGNORE_FILES=("package-lock.json" "yarn.lock" "custom_instructions.md" "printcode.sh" "project_structure.txt")
 OUTPUT_PREFIX="dump"
 OUTPUT_EXT=".md"
-NUM_FILES=9
+NUM_FILES=16
 
 # Helper to construct find command ignore arguments
 construct_find_args() {
@@ -68,17 +68,30 @@ if [[ "$TOTAL_LINES" -eq 0 ]]; then
     exit 0
 fi
 
-LINES_PER_FILE=$((TOTAL_LINES / NUM_FILES))
+# Sort by path for consistent ordering
+sort -t' ' -k2 "$TMP_LIST" > "${TMP_LIST}.sorted"
+mv "${TMP_LIST}.sorted" "$TMP_LIST"
+
+# Count total source files
+TOTAL_FILES=$(wc -l < "$TMP_LIST")
+
+# Calculate lines per dump file (ceiling division for even distribution)
+LINES_PER_FILE=$(( (TOTAL_LINES + NUM_FILES - 1) / NUM_FILES ))
 if [[ $LINES_PER_FILE -eq 0 ]]; then LINES_PER_FILE=1; fi
 
 echo "Total Lines: $TOTAL_LINES"
-echo "Target Lines Per File: $LINES_PER_FILE"
+echo "Total Files: $TOTAL_FILES"
+echo "Target Lines Per Dump: $LINES_PER_FILE"
+
+# Initialize all dump files (so we get exactly NUM_FILES)
+for i in $(seq 1 $NUM_FILES); do
+    FILE_NAME="${OUTPUT_PREFIX}${i}${OUTPUT_EXT}"
+    echo "# Code Dump Part $i" > "$FILE_NAME"
+done
 
 CURRENT_FILE_INDEX=1
 CURRENT_LINE_COUNT=0
-
 FILE_NAME="${OUTPUT_PREFIX}${CURRENT_FILE_INDEX}${OUTPUT_EXT}"
-echo "# Code Dump Part $CURRENT_FILE_INDEX" > "$FILE_NAME"
 
 while read -r lines path; do
     # Display path relative to root
@@ -97,18 +110,28 @@ while read -r lines path; do
     CURRENT_LINE_COUNT=$((CURRENT_LINE_COUNT + lines))
     
     # Check if we should rotate to next file
-    # We rotate if we exceeded target lines AND we aren't on the last file
+    # Only rotate if:
+    # 1. Current file has reached target size
+    # 2. We haven't used all NUM_FILES yet
     if [ $CURRENT_LINE_COUNT -ge $LINES_PER_FILE ] && [ $CURRENT_FILE_INDEX -lt $NUM_FILES ]; then
         echo "Created $FILE_NAME ($CURRENT_LINE_COUNT lines)"
         
         CURRENT_FILE_INDEX=$((CURRENT_FILE_INDEX + 1))
         CURRENT_LINE_COUNT=0
         FILE_NAME="${OUTPUT_PREFIX}${CURRENT_FILE_INDEX}${OUTPUT_EXT}"
-        
-        echo "# Code Dump Part $CURRENT_FILE_INDEX" > "$FILE_NAME"
     fi
 done < "$TMP_LIST"
 
 echo "Created $FILE_NAME ($CURRENT_LINE_COUNT lines)"
+
+# Report on any empty dump files
+for i in $(seq 1 $NUM_FILES); do
+    FILE_NAME="${OUTPUT_PREFIX}${i}${OUTPUT_EXT}"
+    lines=$(wc -l < "$FILE_NAME")
+    if [ $lines -le 1 ]; then
+        rm "$FILE_NAME"  # Remove empty dumps
+    fi
+done
+
 rm "$TMP_LIST"
 echo "Done."
