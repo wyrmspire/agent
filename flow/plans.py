@@ -44,6 +44,16 @@ def create_system_prompt(
 
 Your goal is to help the user accomplish their task efficiently.
 
+PLATFORM: Windows (CMD shell)
+For shell commands, use Windows syntax:
+- dir (not ls)
+- copy (not cp)
+- move (not mv)  
+- type (not cat)
+- mkdir path\\to\\dir (not mkdir -p, Windows mkdir creates parents automatically)
+- del (not rm)
+- Use backslash \\ for paths
+
 CRITICAL - Tool Call Format:
 To call a tool, use this EXACT XML format:
 <tool name="tool_name">{"arg1": "value1", "arg2": "value2"}</tool>
@@ -58,6 +68,13 @@ IMPORTANT:
 - Use "." for current directory, not absolute paths
 - Arguments must be valid JSON inside the tool tag
 - Only call ONE tool at a time and wait for the result
+
+ERROR RECOVERY:
+If a tool fails:
+1. EXPLAIN what failed and why (don't just retry silently)
+2. Try a DIFFERENT approach (not the same command again)
+3. If stuck after 2 attempts, ask the user for guidance
+Never retry the exact same failing command more than once.
 """
     
     # Phase 1.3: Complete protocol set

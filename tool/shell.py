@@ -18,10 +18,14 @@ Rules:
 """
 
 import asyncio
+import platform
 from typing import Any, Dict
 
 from core.types import ToolResult
 from .bases import BaseTool, create_json_schema
+
+# Detect platform once at import
+IS_WINDOWS = platform.system() == "Windows"
 
 
 class ShellTool(BaseTool):
@@ -37,7 +41,15 @@ class ShellTool(BaseTool):
     
     @property
     def description(self) -> str:
-        return f"Execute a shell command. CWD: {self.cwd}. Timeout: {self.timeout}s."
+        if IS_WINDOWS:
+            return (
+                f"Execute a shell command (Windows CMD). CWD: {self.cwd}. Timeout: {self.timeout}s. "
+                "WINDOWS COMMANDS: Use 'dir' not 'ls', 'copy' not 'cp', 'move' not 'mv', "
+                "'type' not 'cat', 'mkdir' not 'mkdir -p' (Windows mkdir creates parents automatically). "
+                "Use backslash \\\\ for paths. For complex scripts, prefer 'python -c \"...\"'."
+            )
+        else:
+            return f"Execute a shell command (bash). CWD: {self.cwd}. Timeout: {self.timeout}s."
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -45,7 +57,9 @@ class ShellTool(BaseTool):
             properties={
                 "command": {
                     "type": "string",
-                    "description": "Shell command to execute",
+                    "description": "Shell command to execute" + (
+                        " (use Windows CMD syntax, not Unix)" if IS_WINDOWS else ""
+                    ),
                 },
                 "cwd": {
                     "type": "string",
@@ -61,7 +75,7 @@ class ShellTool(BaseTool):
         cwd = arguments.get("cwd", self.cwd)
         
         try:
-            # Create subprocess
+            # Create subprocess (uses system shell - CMD on Windows, bash on Unix)
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
