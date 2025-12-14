@@ -17,15 +17,15 @@ This is a **local-first agent server** that gives coding models full access to t
 > ⚠️ **LOCAL MODEL MEMORY LIMITS**
 > 
 > Local models (Qwen 7B on 8GB VRAM) can OOM on long conversations with many tool calls.
-> Each tool result adds to context. **Currently no automatic context management.**
+> Each tool result adds to context.
 > 
-> **Workarounds:**
+> **Solutions:**
+> - **Phase 0.8B Task Queue** - Break work into bounded tasks with checkpoints (recommended)
 > - Use `--gemini` flag for complex multi-step tasks (Gemini has 1M token context)
 > - Keep local model conversations short
-> - Restart between complex tasks
 > 
-> **Roadmap (v1.0+):** Context truncation, task queuing, and run continuation so local
-> models can break up work and resume across multiple runs.
+> **Phase 0.8B** introduces task queuing and run continuation so local models can break up 
+> work into resumable chunks. See [docts/phase08.md](docts/phase08.md) for details.
 
 ## Architecture
 
@@ -201,6 +201,31 @@ Track project lifecycle with persistent state:
 4. **Promote**: Agent calls `promote_skill` tool
 5. **Evolve**: Function becomes a registered tool immediately
 6. **Use**: Agent can now call the tool without rewriting code
+
+## Phase 0.8 Features: VectorGit + Task Queue
+
+### VectorGit v0: Durable Code Memory
+
+**Find the truth** - Deterministic chunking and keyword retrieval for code:
+- Ingest repositories into semantic chunks (functions, classes, sections)
+- Query with keywords to find relevant code
+- Deterministic chunk IDs for reliable citations
+- No vectors yet (keyword-only) - embeddings in Phase 0.9
+
+```bash
+python vectorgit.py ingest /path/to/repo
+python vectorgit.py query "authentication" --topk 8
+```
+
+### Task Queue v0: Bounded Execution
+
+**Keep going** - Break work into resumable tasks with checkpoints:
+- Tasks with tool call/step budgets
+- JSONL task packets + Markdown checkpoints
+- queue_add, queue_next, queue_done, queue_fail tools
+- One task per run prevents context overflow
+
+See [docts/phase08.md](docts/phase08.md) for complete Phase 0.8 documentation.
 
 ### Example: Creating a Custom Tool
 ```python
