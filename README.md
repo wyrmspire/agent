@@ -1,103 +1,84 @@
 # Agent
 
-A clean, well-architected local agent server for Qwen 2.5 Coder (and other coding models).
+A clean, well-architected local agent server for coding models.
 
 ## Overview
 
-This is a **local-first agent server** that gives coding models full access to tools in a safe, extensible way.
+**Local-first agent server** with full tool access in a safe, extensible way.
+
+**Phase:** 1.3 (Operational Durability)
 
 **Key features:**
 - 🏠 **Local-first** - Runs on your machine with OpenAI-compatible APIs
-- 🛠️ **Tool-powered** - Real filesystem, shell, HTTP, and memory access
-- 🔒 **Safe** - Workspace isolation, Patch Protocol, and rule-based validation
-- 🧩 **Modular** - Clean architecture with pluggable components
-- 🧠 **Durable Memory** - VectorGit (Phase 0.8A) for semantic code retrieval
-- 📋 **Task Queue** - Phase 0.8B bounded execution for long-running workflows
+- 🛠️ **17 Tools** - Files, shell, patches, queue, search, memory
+- 🔒 **Safe** - Workspace isolation, Patch Protocol, rule-based validation
+- 💾 **Crash-safe** - Atomic writes, corruption detection, self-healing
+- ⚡ **Fast** - O(1) keyword search, 10-100x speedup on large repos
+- 📋 **Resumable** - Task Queue with checkpoints for long-running work
 
-> ⚠️ **LOCAL MODEL MEMORY LIMITS**
->
-> Local models can OOM on long conversations.
-> **Solution (Phase 0.8B):** Use the **Task Queue** tools (`queue_add`, `queue_next`) to break work into small, checkpointed units.
+## Quick Start
+
+```bash
+# Install
+git clone https://github.com/wyrmspire/agent.git
+cd agent
+pip install -r requirements.txt
+
+# Run
+python cli.py
+```
 
 ## Architecture
 
 ```
 boot/   → Entry point and dependency wiring
-core/   → Core types, protocols, skills compiler (no dependencies)
-gate/   → Model gateway (OpenAI-compatible APIs)
-tool/   → Real tools (files, shell, patch, queue, vectorgit)
-flow/   → Agent reasoning loop and project planner
-store/  → Memory (chunks, checkpoints, vector store)
+core/   → Core types, protocols (no dependencies)
+gate/   → Model gateway (OpenAI-compatible)
+tool/   → 17 tools (files, shell, patch, queue, search)
+flow/   → Agent reasoning loop
+store/  → Memory (chunks, vectors, checkpoints)
 servr/  → API server (optional)
-model/  → Model configurations
 tests/  → Comprehensive test suite
-docts/  → Documentation
 ```
 
-See [docts/archi.md](docts/archi.md) for detailed architecture.
+See [docts/archi.md](docts/archi.md) for details.
 
 ## Workflow Protocols
 
-### 1. The Patch Protocol (Project Edits)
-To safely modify code, the agent follows a strict propose-and-apply flow:
-1.  **Propose**: Agent uses `create_patch` to draft a plan, diff, and tests.
-2.  **Review**: You (or the system) review the patch.
-3.  **Apply**: The patch is applied only if valid.
+### Patch Protocol (Code Modification)
+1. **Propose**: `create_patch` with plan, diff, tests
+2. **Review**: Human reviews the patch
+3. **Apply**: Patch applied if valid
 
-### 2. The Task Queue (Complex Tasks)
-For large features or refactors:
-1.  **Queue**: Agent breaks the goal into subtasks (`queue_add`).
-2.  **Execute**: Agent picks up one task at a time (`queue_next`).
-3.  **Checkpoint**: Progress is saved to disk (`queue_done`).
+### Task Queue (Long-Running Work)
+1. **Queue**: `queue_add` breaks work into subtasks
+2. **Execute**: `queue_next` gets one task at a time
+3. **Checkpoint**: `queue_done` saves progress
 
-## Quick Start
+### Retrieval Protocol (Code Questions)
+1. **Search**: `search_chunks` before answering
+2. **Cite**: Reference chunk IDs in responses
+3. **Verify**: `read_file` for full context
 
-### Prerequisites
-1.  **Python 3.10+**
-2.  **OpenAI-compatible API** (for model access)
-    *   Option A: Run local model server with `bash runsv.sh`
-    *   Option B: Use external API (LM Studio, Ollama, etc.)
-    *   Default: http://localhost:8000/v1
+## Tools
 
-### Installation
+| Category | Tools |
+|----------|-------|
+| **Files** | `list_files`, `read_file`, `write_file` |
+| **Shell** | `shell` |
+| **HTTP** | `fetch` |
+| **Search** | `search_chunks` |
+| **Patch** | `create_patch`, `list_patches`, `get_patch` |
+| **Queue** | `queue_add`, `queue_next`, `queue_done`, `queue_fail` |
+| **Data** | `data_view`, `pyexe` |
+| **Memory** | `memory` |
 
-```bash
-git clone https://github.com/wyrmspire/agent.git
-cd agent
-pip install -r requirements.txt
-```
-
-### Running the Agent
-
-#### CLI Mode (Interactive)
-
-```bash
-python cli.py
-```
-
-Try:
-- "Analyze this repo" (Uses `search_chunks`)
-- "Create a patch to fix X" (Uses `create_patch`)
-- "Start a task to refactor Y" (Uses `queue_add`)
-
-#### Server Mode (HTTP API)
-
-Start the model server:
-```bash
-bash runsv.sh
-```
-
-This starts:
-- Model server on `http://localhost:8000` (serves the LLM)
-- Chat CLI in a new terminal (connects to the server)
-
-The server provides an OpenAI-compatible API at `/v1/chat/completions` that can be used by the agent CLI or other clients.
+See [docts/tools.md](docts/tools.md) for complete reference.
 
 ## Configuration
 
-Create a `.env` file:
-
 ```bash
+# .env
 AGENT_MODEL=qwen2.5-coder-7b
 AGENT_MODEL_URL=http://localhost:8000/v1
 AGENT_ENABLE_PATCH=true
@@ -105,22 +86,33 @@ AGENT_ENABLE_QUEUE=true
 AGENT_ENABLE_CHUNK_SEARCH=true
 ```
 
-## Tools
+## Testing
 
-See [docts/tools.md](docts/tools.md) for the complete reference.
-
-### Core Tools
-- **Project**: `create_patch`, `list_patches`, `get_patch`
-- **Queue**: `queue_add`, `queue_next`, `queue_done`
-- **Memory**: `search_chunks` (VectorGit)
-- **System**: `list_files`, `read_file`, `shell`, `fetch`
-- **Analysis**: `data_view`, `pyexe`
+```bash
+pytest tests/ -v            # Full suite
+./smoke_test.sh             # Quick health check
+```
 
 ## Documentation
 
-- [Flows & Protocols](docts/flows.md) - How the agent thinks and works
-- [Tools Reference](docts/tools.md) - Detailed tool APIs
-- [Architecture](docts/archi.md) - System design
+| Document | Description |
+|----------|-------------|
+| [SYSTEM_PROMPT_GUIDE.md](SYSTEM_PROMPT_GUIDE.md) | Tool calling guide |
+| [PHASE_1_ROADMAP.md](PHASE_1_ROADMAP.md) | Current roadmap |
+| [agents.md](agents.md) | Development journey |
+| [docts/archi.md](docts/archi.md) | Architecture |
+| [docts/tools.md](docts/tools.md) | Tool reference |
+| [docts/flows.md](docts/flows.md) | Workflow patterns |
+
+## Phase 1.3 Features
+
+- ✅ **Crash-safe storage** - Atomic writes, never partial state
+- ✅ **Corruption detection** - Self-healing on startup
+- ✅ **O(1) keyword search** - Inverted index
+- ✅ **Fast vector search** - O(N) top-K with argpartition
+- ✅ **Stale chunk detection** - Clean re-ingestion
+
+See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for details.
 
 ## License
 
