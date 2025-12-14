@@ -23,12 +23,14 @@ Rules:
 """
 
 import logging
+import time
 from typing import List, Optional
 from dataclasses import dataclass
 
 from core.types import Message, MessageRole, ToolCall, ToolResult, Step, StepType
 from core.state import AgentState, ConversationState, ExecutionContext
 from core.rules import RuleEngine
+from core.trace import TraceLogger
 from gate.bases import ModelGateway
 from tool.index import ToolRegistry
 from flow.judge import AgentJudge
@@ -104,6 +106,9 @@ class AgentLoop:
         """
         logger.info(f"Starting agent loop for message: {user_message[:50]}...")
         
+        # Create tracer for this run (local to avoid concurrency issues)
+        tracer = TraceLogger(state.execution.run_id)
+        
         # Add user message
         state.conversation.add_message(Message(
             role=MessageRole.USER,
@@ -112,7 +117,7 @@ class AgentLoop:
         
         # Run loop
         try:
-            final_answer = await self._reasoning_loop(state)
+            final_answer = await self._reasoning_loop(state, tracer)
             
             return LoopResult(
                 success=True,
@@ -129,13 +134,17 @@ class AgentLoop:
                 error=str(e),
             )
     
-    async def _reasoning_loop(self, state: AgentState) -> str:
+    async def _reasoning_loop(self, state: AgentState, tracer: TraceLogger) -> str:
         """Internal reasoning loop.
         
         Continues until:
         - Model provides final answer (no more tool calls)
         - Max steps reached
         - Error occurs
+        
+        Args:
+            state: Agent state
+            tracer: TraceLogger instance for this run
         
         Returns:
             Final answer string
@@ -179,7 +188,7 @@ class AgentLoop:
                     continue
                 
                 # Execute tools (with per-tool budget enforcement)
-                tool_results, budget_hit = await self._execute_tools(state, response.tool_calls)
+                tool_results, budget_hit = await self._execute_tools(state, response.tool_calls, tracer)
                 
                 # Print tool results to terminal for user visibility
                 for i, result in enumerate(tool_results):
@@ -270,6 +279,7 @@ class AgentLoop:
         self,
         state: AgentState,
         tool_calls: List[ToolCall],
+        tracer: TraceLogger,
     ) -> tuple[List[ToolResult], bool]:
         """Execute a list of tool calls with per-tool budget enforcement.
         
@@ -283,6 +293,7 @@ class AgentLoop:
         Args:
             state: Current agent state
             tool_calls: List of tool calls from model
+            tracer: TraceLogger instance for this run
             
         Returns:
             Tuple of (list of tool results, whether budget was hit mid-batch)
@@ -299,8 +310,14 @@ class AgentLoop:
             
             logger.info(f"Executing tool: {tool_call.name}")
             
+            # Trace: Log tool call initiation
+            tracer.log_tool_call(tool_call)
+            
             # Phase 0.5: Record tool use AFTER confirming budget allows it
             state.execution.record_tool_use()
+            
+            # Start timing
+            start_time = time.perf_counter()
             
             # Validate with rule engine
             is_allowed, violations = self.rule_engine.evaluate(tool_call)
@@ -331,7 +348,11 @@ class AgentLoop:
             # Execute tool
             try:
                 result = await tool.call(tool_call)
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
                 logger.info(f"Tool {tool_call.name} completed: success={result.success}")
+                
+                # Trace: Log tool result
+                tracer.log_tool_result(result, elapsed_ms, tool_call.name)
                 
                 # Add step
                 state.execution.add_step(Step(

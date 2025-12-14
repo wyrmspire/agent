@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from core.types import ToolResult
 from core.sandb import Workspace, WorkspaceError, ResourceLimitError, get_default_workspace
+from core.patch import BlockedBy, create_tool_error, format_tool_error
 from .bases import BaseTool, create_json_schema
 
 
@@ -77,10 +78,16 @@ class ListFiles(BaseTool):
                 is_project = False
             
             if not path.is_dir():
+                error = create_tool_error(
+                    blocked_by=BlockedBy.MISSING,
+                    error_code="NOT_A_DIRECTORY",
+                    message=f"Path is not a directory: {path}",
+                    context={"path": str(path)}
+                )
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error=f"Path is not a directory: {path}",
+                    error=format_tool_error(error),
                     success=False,
                 )
             
@@ -132,17 +139,29 @@ class ListFiles(BaseTool):
             )
         
         except WorkspaceError as e:
+            error = create_tool_error(
+                blocked_by=BlockedBy.WORKSPACE,
+                error_code="PATH_OUTSIDE_WORKSPACE",
+                message=str(e),
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error=str(e),
+                error=format_tool_error(error),
                 success=False,
             )
         except Exception as e:
+            error = create_tool_error(
+                blocked_by=BlockedBy.RUNTIME,
+                error_code="LIST_DIR_ERROR",
+                message=f"Error listing directory: {e}",
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error=f"Error listing directory: {e}",
+                error=format_tool_error(error),
                 success=False,
             )
 
@@ -216,20 +235,32 @@ class ReadFile(BaseTool):
                 is_project = True
             
             if not path.is_file():
+                error = create_tool_error(
+                    blocked_by=BlockedBy.MISSING,
+                    error_code="NOT_A_FILE",
+                    message=f"Path is not a file: {path}",
+                    context={"path": str(path)}
+                )
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error=f"Path is not a file: {path}",
+                    error=format_tool_error(error),
                     success=False,
                 )
             
             # Check size
             size = path.stat().st_size
             if size > self.max_size:
+                error = create_tool_error(
+                    blocked_by=BlockedBy.RUNTIME,
+                    error_code="FILE_TOO_LARGE",
+                    message=f"File too large: {size} bytes (max {self.max_size}). Use data_view tool.",
+                    context={"size": size, "max_size": self.max_size}
+                )
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error=f"File too large: {size} bytes (max {self.max_size}). Use data_view tool.",
+                    error=format_tool_error(error),
                     success=False,
                 )
             
@@ -280,24 +311,42 @@ class ReadFile(BaseTool):
             )
         
         except WorkspaceError as e:
+            error = create_tool_error(
+                blocked_by=BlockedBy.WORKSPACE,
+                error_code="PATH_OUTSIDE_WORKSPACE",
+                message=str(e),
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error=str(e),
+                error=format_tool_error(error),
                 success=False,
             )
         except UnicodeDecodeError:
+            error = create_tool_error(
+                blocked_by=BlockedBy.RUNTIME,
+                error_code="INVALID_ENCODING",
+                message="File is not valid UTF-8 text",
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error="File is not valid UTF-8 text",
+                error=format_tool_error(error),
                 success=False,
             )
         except Exception as e:
+            error = create_tool_error(
+                blocked_by=BlockedBy.RUNTIME,
+                error_code="READ_FILE_ERROR",
+                message=f"Error reading file: {e}",
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error=f"Error reading file: {e}",
+                error=format_tool_error(error),
                 success=False,
             )
 
@@ -353,10 +402,16 @@ class WriteFile(BaseTool):
             try:
                 self.workspace.check_resources()
             except ResourceLimitError as e:
+                error = create_tool_error(
+                    blocked_by=BlockedBy.RUNTIME,
+                    error_code="RESOURCE_LIMIT",
+                    message=f"Resource limit exceeded: {e}",
+                    context={"path": path_str}
+                )
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error=f"Resource limit exceeded: {e}",
+                    error=format_tool_error(error),
                     success=False,
                 )
             
@@ -374,16 +429,28 @@ class WriteFile(BaseTool):
             )
         
         except WorkspaceError as e:
+            error = create_tool_error(
+                blocked_by=BlockedBy.WORKSPACE,
+                error_code="PATH_OUTSIDE_WORKSPACE",
+                message=str(e),
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error=str(e),
+                error=format_tool_error(error),
                 success=False,
             )
         except Exception as e:
+            error = create_tool_error(
+                blocked_by=BlockedBy.RUNTIME,
+                error_code="WRITE_FILE_ERROR",
+                message=f"Error writing file: {e}",
+                context={"path": path_str}
+            )
             return ToolResult(
                 tool_call_id="",
                 output="",
-                error=f"Error writing file: {e}",
+                error=format_tool_error(error),
                 success=False,
             )
