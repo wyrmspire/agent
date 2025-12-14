@@ -65,9 +65,12 @@ class VectorGit:
         Returns:
             Number of chunks ingested
         """
-        # Call the async version without embeddings if synced call needed
-        # Or just do keyword ingest
-        return asyncio.run(self.ingest_async(repo_path, gateway=None))
+        # Safety check: Do not run async loop from within sync context if loop exists
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.ingest_async(repo_path, gateway=None))
+        raise RuntimeError("Cannot use synchronous ingest() from inside an event-loop. Use ingest_async().")
 
     async def ingest_async(
         self, 
@@ -100,26 +103,24 @@ class VectorGit:
         # 2. Vector Embedding (Phase 0.9)
         if gateway and count > 0:
             logger.info("Computing embeddings for clean chunks...")
-            # Ideally we only embed ONLY new chunks, but for now we'll check consistency
-            # VectorStore.add handles updates/appends
             
-            # Find chunks that are missing from vector store OR new
-            # For simplicity in v0.9, we scan all chunks in manager
-            chunks_to_embed = []
+            # Prune stale vectors
+            current_ids = list(self.chunk_manager.chunks.keys())
+            self.vector_store.prune(current_ids)
+            
+            # Find chunks that are missing from vector store
             ids_to_embed = []
             texts_to_embed = []
             
-            # Identify what needs embedding
-            # Optimization: check if ID in vector store
             existing_ids = set(self.vector_store.chunk_ids)
             
+            # Iterate using chunks meta, but load content on demand via get_chunk
             for chunk_id, chunk_meta in self.chunk_manager.chunks.items():
                 if chunk_id not in existing_ids:
-                    content = self.chunk_manager.chunk_content.get(chunk_id)
-                    # If content missing (reloaded from manifest), we might skip or re-read?
-                    # ChunkManager currently doesn't persist content to disk except in memory
-                    # We might need to handle 'content missing' if we just loaded manifest
-                    # But ingest just ran, so content should be in memory
+                    # Load content (from disk or memory)
+                    chunk_data = self.chunk_manager.get_chunk(chunk_id)
+                    content = chunk_data.get("content") if chunk_data else None
+                    
                     if content:
                         ids_to_embed.append(chunk_id)
                         # Format text for embedding: "Type: Name\nContent"
@@ -128,10 +129,9 @@ class VectorGit:
             
             if ids_to_embed:
                 logger.info(f"Embedding {len(ids_to_embed)} chunks...")
-                # Batch processing could go here
                 try:
                     vectors = await gateway.embed(texts_to_embed)
-                    self.vector_store.add(ids_to_embed, vectors)
+                    self.vector_store.add(ids_to_embed, vectors, model_name=gateway.model)
                     self.vector_store.save()
                     logger.info(f"Embeddings saved for {len(vectors)} chunks")
                 except Exception as e:
@@ -166,7 +166,7 @@ class VectorGit:
                 # 1. Embed Query
                 query_vec = await gateway.embed_single(query_text)
                 if query_vec:
-                    # 2. Vector Search
+                    # 2. Vector Search (Deterministic sort internally)
                     results = self.vector_store.search(query_vec, k=top_k)
                     
                     # 3. Hydrate Chunks
@@ -175,8 +175,12 @@ class VectorGit:
                         chunk = self.chunk_manager.get_chunk(chunk_id)
                         if chunk:
                             chunk["score"] = score  # Add similarity score
-                            chunk["snippet"] = self.chunk_manager._get_snippet(chunk["content"], query_text)
+                            chunk["snippet"] = self.chunk_manager.get_snippet(chunk["content"], query_text)
                             final_results.append(chunk)
+                    
+                    # 4. Strict Deterministic Sort (Score Desc, Chunk ID Asc)
+                    # This ensures stability even if hydration order/missing chunks affect layout
+                    final_results.sort(key=lambda x: (-x["score"], x["chunk_id"]))
                     
                     if final_results:
                         return final_results
@@ -211,10 +215,10 @@ class VectorGit:
             end = chunk["end_line"]
             content = chunk["content"]
             score = chunk.get("score", "N/A")
+            chunk_id = chunk["chunk_id"]
             
             context_parts.append(
-                f"--- CHUNK {i} (Score: {score}) ---\n"
-                f"File: {source} (lines {start}-{end})\n"
+                f"--- [CITATION {chunk_id}] {source}:L{start}-L{end} (Score: {score}) ---\n"
                 f"Content:\n{content}\n"
             )
         
@@ -223,7 +227,7 @@ class VectorGit:
         # Construct prompt
         system_prompt = (
             "You are an expert coding assistant. Answer the user's question based ONLY "
-            "on the provided code chunks. Cite your sources by referring to the File and Line numbers.\n"
+            "on the provided code chunks. Cite your sources using the format: [CITATION chunk_id].\n"
             "If the provided chunks do not contain enough information to answer, say so."
         )
         

@@ -73,6 +73,19 @@ class TestVectorGitIntegration(unittest.TestCase):
                 print(f"  {r['source_path']}: {r.get('score', 0):.4f}")
             
             self.assertIn("payment.py", results[0]["source_path"])
+
+            # 5. Verify Persistence (Simulate Restart)
+            print("\n[Simulating Restart] Re-initializing VectorGit...")
+            vg_new = VectorGit(workspace_path=str(self.workspace))
+            
+            # Should have loaded vectors and manifest from disk
+            # NOTE: chunks are lazy-loaded, so we query to prove availability
+            results_reloaded = await vg_new.query_async("payment", gateway=gateway, top_k=2)
+            
+            self.assertTrue(len(results_reloaded) > 0, "Failed to retrieve after restart")
+            self.assertIn("payment.py", results_reloaded[0]["source_path"])
+            # Ensure content is present (proving read from disk)
+            self.assertIn("def process_payment", results_reloaded[0]["content"])
             
         asyncio.run(run_test())
 
