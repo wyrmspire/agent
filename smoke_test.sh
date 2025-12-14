@@ -8,10 +8,12 @@
 #   0 = All checks passed
 #   1 = One or more checks failed
 
-set -e  # Exit on error
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# Create secure temporary directory
+TEMP_DIR=$(mktemp -d -t smoke_test.XXXXXX)
+trap "rm -rf '$TEMP_DIR'" EXIT
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -27,14 +29,15 @@ function check() {
     shift
     echo -n "Checking $name... "
     
-    if "$@" > /tmp/smoke_test_output.log 2>&1; then
+    local log_file="$TEMP_DIR/output.log"
+    if "$@" > "$log_file" 2>&1; then
         echo -e "${GREEN}PASS${NC}"
         PASSED=$((PASSED + 1))
         return 0
     else
         echo -e "${RED}FAIL${NC}"
         echo "  Error output:"
-        sed 's/^/    /' /tmp/smoke_test_output.log | head -20
+        sed 's/^/    /' "$log_file" | head -20
         FAILED=$((FAILED + 1))
         return 1
     fi
@@ -113,15 +116,16 @@ print(\"Judge OK\")
 
 # Check 10: Patch manager works
 check "Patch manager" run_check "python3 -c '
-import sys
+import sys, os
 sys.path.insert(0, \".\")
 from core.patch import PatchManager
-pm = PatchManager(workspace_dir=\"/tmp/smoke_test_workspace\")
+temp_dir = os.environ.get(\"TEMP_DIR\", \"/tmp\")
+pm = PatchManager(workspace_dir=f\"{temp_dir}/smoke_test_workspace\")
 assert pm.patches_dir.exists(), \"Patches directory not created\"
 stats = pm.get_stats()
 assert \"total_patches\" in stats, \"Patch stats missing\"
 print(\"Patch manager OK\")
-'"
+'" env TEMP_DIR="$TEMP_DIR"
 
 # Check 11: Tool registry works
 check "Tool registry" run_check "python3 -c '

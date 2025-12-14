@@ -113,15 +113,15 @@ ls -la /home/runner/work/agent/agent/workspace/test2.txt
 
 ---
 
-## Goal 3: Smoke Runner Script 📋
+## Goal 3: Smoke Runner Script ✅
 
 **Intent**: Single command to verify system health after changes.
 
 ### Current State
-- ⚠️ No unified smoke test script
-- ✅ Test suite exists (`pytest tests/ -v`)
-- ⚠️ Tests require dependencies installation
-- ⚠️ No quick "is it broken?" check
+- ✅ Unified smoke test script exists (`./smoke_test.sh`)
+- ✅ Runs 14 checks in ~10 seconds
+- ✅ Verifies core functionality without external model
+- ✅ Test suite also exists (`pytest tests/ -v`)
 
 ### Gap
 - Need `./smoke_test.sh` that runs in <30 seconds
@@ -142,20 +142,25 @@ ls -la /home/runner/work/agent/agent/workspace/test2.txt
 ```
 
 ### Success Criteria
-- [ ] `smoke_test.sh` exists and is executable
-- [ ] Runs in < 30 seconds
-- [ ] Tests core functionality without external dependencies
-- [ ] Provides clear pass/fail output
-- [ ] Returns proper exit codes (0=pass, 1=fail)
+- [x] `smoke_test.sh` exists and is executable
+- [x] Runs in < 30 seconds (currently ~10 seconds)
+- [x] Tests core functionality without external dependencies
+- [x] Provides clear pass/fail output
+- [x] Returns proper exit codes (0=pass, 1=fail)
 
 ### Implementation
-1. Create `smoke_test.sh` with:
-   - Import check (`python -c "import core, flow, tool, gate"`)
-   - Mock agent run (1 turn with read_file tool)
-   - Workspace write/read test
-   - Judge check (ensure it runs)
-2. Add to README.md usage section
-3. Add to CI/CD pipeline
+1. ✅ Created `smoke_test.sh` with:
+   - Import checks for all core modules
+   - Workspace creation and isolation tests
+   - Resource monitoring verification
+   - Judge functionality test
+   - Patch manager test
+   - Tool registry verification
+   - Mock gateway test
+   - Run ID generation test
+   - Error taxonomy test
+2. ✅ Added to README.md testing section
+3. ⏸️ CI/CD pipeline (no .github/workflows yet)
 
 ---
 
