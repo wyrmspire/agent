@@ -75,6 +75,12 @@ If a tool fails:
 2. Try a DIFFERENT approach (not the same command again)
 3. If stuck after 2 attempts, ask the user for guidance
 Never retry the exact same failing command more than once.
+
+BENIGN ERRORS (not actually failures):
+- "already exists" = the work is DONE, move to next step
+- "file not found" when deleting = file already gone, move on
+- Exit code 0 with no output = silent success, continue
+Treat these as success and proceed to the next task.
 """
     
     # Phase 1.3: Complete protocol set
