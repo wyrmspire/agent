@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from store.chunks import ChunkManager
-from store.vectors import VectorStore
+from store.vectors import VectorStore, CorruptedIndexError
 from gate.bases import ModelGateway, EmbeddingGateway
 from core.types import Message, MessageRole
 
@@ -33,15 +33,19 @@ class VectorGit:
         self,
         workspace_path: str = "./workspace",
         index_name: str = "vectorgit",
+        auto_heal: bool = True,
     ):
-        """Initialize VectorGit.
+        """Initialize VectorGit with self-healing capability (Phase 1.3).
         
         Args:
             workspace_path: Root workspace path
             index_name: Name of the index (subdirectory in workspace)
+            auto_heal: If True, automatically rebuild on corruption
         """
         self.workspace_root = Path(workspace_path)
         self.index_dir = self.workspace_root / index_name
+        self.auto_heal = auto_heal
+        self.corruption_detected = False
         
         # Initialize ChunkManager
         self.chunks_dir = self.index_dir / "chunks"
@@ -52,9 +56,84 @@ class VectorGit:
             manifest_path=str(self.manifest_path),
         )
         
-        # Initialize VectorStore (Phase 0.9A)
+        # Initialize VectorStore with corruption handling (Phase 1.3)
         self.vector_store_path = self.index_dir / "vectors"
-        self.vector_store = VectorStore(store_path=str(self.vector_store_path))
+        self.vector_store = None
+        
+        # Try to load, catching corruption
+        try:
+            store = VectorStore.__new__(VectorStore)
+            store.store_path = Path(str(self.vector_store_path))
+            store.vectors_path = store.store_path / "embeddings.npz"
+            store.manifest_path = store.store_path / "vectors_manifest.json"
+            store.vectors = None
+            store.chunk_ids = []
+            store.id_to_index = {}
+            store.metadata = {
+                "embedding_model": "unknown",
+                "dim": 0,
+                "count": 0,
+                "normalized": True,
+                "updated_at": ""
+            }
+            store.store_path.mkdir(parents=True, exist_ok=True)
+            
+            # Try to load
+            store.load()
+            self.vector_store = store
+            
+        except CorruptedIndexError as e:
+            logger.warning(f"Index corruption detected during initialization: {e}")
+            self.corruption_detected = True
+            if self.auto_heal:
+                logger.info("Auto-healing enabled: will rebuild vectors on next embed operation")
+                # Use the partially initialized store
+                self.vector_store = store
+                self.vector_store.vectors = None
+                self.vector_store.chunk_ids = []
+                self.vector_store.id_to_index = {}
+            else:
+                raise
+    
+    async def rebuild_vectors(self, gateway: EmbeddingGateway) -> int:
+        """Rebuild all vectors from chunks (Phase 1.3 self-healing).
+        
+        Args:
+            gateway: Embedding gateway to use for re-embedding
+            
+        Returns:
+            Number of vectors rebuilt
+        """
+        logger.info("Starting vector rebuild from chunks...")
+        
+        # Clear existing vectors
+        self.vector_store.vectors = None
+        self.vector_store.chunk_ids = []
+        self.vector_store.id_to_index = {}
+        
+        # Re-embed all chunks
+        ids_to_embed = []
+        texts_to_embed = []
+        
+        for chunk_id, chunk_meta in self.chunk_manager.chunks.items():
+            chunk_data = self.chunk_manager.get_chunk(chunk_id)
+            content = chunk_data.get("content") if chunk_data else None
+            
+            if content:
+                ids_to_embed.append(chunk_id)
+                text = f"{chunk_meta.chunk_type}: {chunk_meta.name or ''}\n{content}"
+                texts_to_embed.append(text)
+        
+        if ids_to_embed:
+            logger.info(f"Re-embedding {len(ids_to_embed)} chunks...")
+            vectors = await gateway.embed(texts_to_embed)
+            self.vector_store.add(ids_to_embed, vectors, model_name=gateway.model)
+            self.vector_store.save()
+            logger.info(f"Vector rebuild complete: {len(vectors)} vectors")
+            self.corruption_detected = False
+            return len(vectors)
+        
+        return 0
     
     def ingest(self, repo_path: str) -> int:
         """Ingest a repository using keyword search only (legacy sync).
@@ -104,6 +183,11 @@ class VectorGit:
         if gateway and count > 0:
             logger.info("Computing embeddings for clean chunks...")
             
+            # Phase 1.3: Self-healing - rebuild if corruption detected
+            if self.corruption_detected:
+                logger.warning("Corruption detected, rebuilding vectors...")
+                await self.rebuild_vectors(gateway)
+                return count
             
             # Prune stale vectors (global prune for removed files)
             current_ids = list(self.chunk_manager.chunks.keys())
