@@ -382,7 +382,12 @@ class ChunkManager:
         """Get statistics about chunks.
         
         Returns:
-            Dict with statistics about the chunk manager
+            Dict with the following keys:
+                - total_chunks: Total number of chunks
+                - chunk_types: Dict mapping chunk type to count
+                - total_sources: Number of source files tracked
+                - manifest_path: Path to manifest file
+                - chunks_dir: Path to chunks directory
         """
         chunk_types = {}
         for chunk in self.chunks.values():
