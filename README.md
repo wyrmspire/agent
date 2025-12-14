@@ -53,10 +53,11 @@ For large features or refactors:
 ## Quick Start
 
 ### Prerequisites
-1.  **OpenAI-compatible API** (LM Studio, Ollama, etc.)
+1.  **Python 3.10+**
+2.  **OpenAI-compatible API** (for model access)
+    *   Option A: Run local model server with `bash runsv.sh`
+    *   Option B: Use external API (LM Studio, Ollama, etc.)
     *   Default: http://localhost:8000/v1
-    *   Model: Qwen 2.5 Coder (recommended)
-2.  **Python 3.10+**
 
 ### Installation
 
@@ -66,7 +67,9 @@ cd agent
 pip install -r requirements.txt
 ```
 
-### Run CLI Demo
+### Running the Agent
+
+#### CLI Mode (Interactive)
 
 ```bash
 python cli.py
@@ -76,6 +79,19 @@ Try:
 - "Analyze this repo" (Uses `search_chunks`)
 - "Create a patch to fix X" (Uses `create_patch`)
 - "Start a task to refactor Y" (Uses `queue_add`)
+
+#### Server Mode (HTTP API)
+
+Start the model server:
+```bash
+bash runsv.sh
+```
+
+This starts:
+- Model server on `http://localhost:8000` (serves the LLM)
+- Chat CLI in a new terminal (connects to the server)
+
+The server provides an OpenAI-compatible API at `/v1/chat/completions` that can be used by the agent CLI or other clients.
 
 ## Configuration
 

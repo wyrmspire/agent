@@ -378,6 +378,29 @@ class ChunkManager:
         if end < len(content): snippet = snippet + "..."
         return snippet
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Get statistics about chunks.
+        
+        Returns:
+            Dict with the following keys:
+                - total_chunks: Total number of chunks
+                - chunk_types: Dict mapping chunk type to count
+                - total_sources: Number of source files tracked
+                - manifest_path: Path to manifest file
+                - chunks_dir: Path to chunks directory
+        """
+        chunk_types = {}
+        for chunk in self.chunks.values():
+            chunk_types[chunk.chunk_type] = chunk_types.get(chunk.chunk_type, 0) + 1
+        
+        return {
+            "total_chunks": len(self.chunks),
+            "chunk_types": chunk_types,
+            "total_sources": len(self.source_to_chunks),
+            "manifest_path": str(self.manifest_path),
+            "chunks_dir": str(self.chunks_dir),
+        }
+    
     def save_manifest(self) -> bool:
         try:
             self.manifest_path.parent.mkdir(parents=True, exist_ok=True)

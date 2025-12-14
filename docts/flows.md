@@ -54,19 +54,32 @@ The basic reasoning loop (`flow/loops.py`) follows this cycle:
 
 ---
 
-## 3. Retrieval Flow (VectorGit)
+## 3. Retrieval Flow (VectorGit) — RAG Discipline (Phase 1.0)
 
 **When to use**: When answering questions about the codebase or finding where to implement a feature.
 
-1.  **Search**:
-    *   Agent calls `search_chunks` with a query (e.g., "auth middleware").
-2.  **Cite**:
-    *   The tool returns chunks with IDs (e.g., `chunk_123ab`).
-    *   Agent uses these IDs in its reasoning.
-3.  **Answer**:
-    *   Agent synthesizes an answer based *only* on the retrieved chunks (RAG).
+**CRITICAL RULE (Phase 1.0)**: The agent's code answers MUST come from VectorGit retrieval, not ad-hoc greps or memory.
 
-**Why?** Prevents hallucinations and ensures the agent is looking at the actual, current code.
+1.  **Search First**:
+    *   Agent MUST call `search_chunks` before answering any code question
+    *   Use semantic queries (e.g., "auth middleware", "error handling logic")
+    *   Review returned chunks and their IDs
+    
+2.  **Cite Sources**:
+    *   The tool returns chunks with IDs (e.g., `chunk_123ab`)
+    *   Agent MUST cite these IDs in responses: [CITATION chunk_123ab]
+    *   Include file paths and line numbers from results
+    
+3.  **Answer from Retrieval**:
+    *   Agent synthesizes an answer based *only* on the retrieved chunks (RAG)
+    *   If no chunks found, say "couldn't find relevant code"
+    *   Never guess or infer without seeing actual code
+    
+4.  **Verify if Needed**:
+    *   Use `read_file` for full context after search_chunks gives pointers
+    *   Combine retrieval + reading for complete understanding
+
+**Why?** Prevents hallucinations and ensures the agent is looking at the actual, current code. This is the "retrieval contract" - no code answers without retrieval first.
 
 ---
 

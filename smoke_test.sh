@@ -106,7 +106,7 @@ ws = Workspace(\"./workspace\")
 stats = ws.get_resource_stats()
 assert \"workspace_size_gb\" in stats, \"Resource stats missing\"
 assert \"ram_free_percent\" in stats, \"RAM stats missing\"
-print(f\"Resources: {stats[\\\"workspace_size_gb\\\"]:.2f}GB workspace, {stats[\\\"ram_free_percent\\\"]:.1f}% RAM free\")
+print(f\"Resources: {stats[\"workspace_size_gb\"]:.2f}GB workspace, {stats[\"ram_free_percent\"]:.1f}% RAM free\")
 '"
 
 # Check 9: Judge can run
@@ -190,6 +190,41 @@ tracer.log_tool_call(tc)
 result = ToolResult(tool_call_id=\"tc_001\", output=\"success\", success=True)
 tracer.log_tool_result(result, elapsed_ms=42.5, tool_name=\"test_tool\")
 print(\"Traceability OK\")
+'"
+
+# Check 16: VectorGit ingest → query → cite workflow (Phase 1.0)
+check "VectorGit workflow (ingest→query→cite)" run_check "$PYTHON_CMD -c '
+import os
+import shutil
+from pathlib import Path
+from tool.vectorgit import VectorGit
+
+# Create test repo
+test_dir = Path(\"$TEMP_DIR/vg_test\")
+if test_dir.exists():
+    shutil.rmtree(test_dir)
+test_dir.mkdir(parents=True)
+
+# Create sample file
+(test_dir / \"sample.py\").write_text(\"def hello():\\n    return \\\"world\\\"\")
+
+# Initialize VectorGit
+vg = VectorGit(workspace_path=\"$TEMP_DIR/vg_workspace\", index_name=\"smoke_test\")
+
+# Ingest
+count = vg.ingest(str(test_dir))
+assert count > 0, \"Ingest failed: no chunks created\"
+
+# Query
+results = vg.query(\"hello\", top_k=5)
+assert len(results) > 0, \"Query failed: no results found\"
+
+# Verify citation (chunk_id present)
+assert \"chunk_id\" in results[0], \"Citation missing: no chunk_id in results\"
+chunk_id = results[0][\"chunk_id\"]
+assert chunk_id.startswith(\"chunk_\"), f\"Invalid chunk_id format: {chunk_id}\"
+
+print(f\"VectorGit workflow OK: ingested {count} chunks, found {len(results)} results with citations\")
 '"
 
 # Summary
