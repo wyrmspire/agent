@@ -189,24 +189,36 @@ class Workspace:
     def _normalize_path(self, p: Path) -> Path:
         """Normalize path for cross-platform comparison.
         
-        Resolves symlinks, normalizes case on Windows, and converts to absolute.
-        This ensures consistent comparison regardless of slash direction or case.
+        Normalizes case on Windows for consistent comparison.
+        NOTE: This method expects p to already be resolved/absolute.
+        Do not call resolve() again to avoid issues with non-existent paths.
         """
-        resolved = p.resolve()
         # On Windows, normalize case for comparison
         if os.name == 'nt':
-            return Path(os.path.normcase(str(resolved)))
-        return resolved
+            return Path(os.path.normcase(str(p)))
+        return p
     
     def _strip_workspace_prefix(self, path_str: str) -> str:
         """Strip workspace/ prefix if agent included it.
         
         The agent sees 'workspace/' in project listings and may include it.
+        Only strips if 'workspace' is the first path segment to avoid issues
+        with paths like 'workspace/workspace/test.txt' where 'workspace' is
+        a legitimate subfolder name.
         """
-        if path_str.startswith("workspace/"):
-            return path_str[len("workspace/"):]
-        elif path_str.startswith("workspace\\"):
-            return path_str[len("workspace\\"):]
+        # Convert to Path to properly parse segments
+        path_obj = Path(path_str)
+        parts = path_obj.parts
+        
+        # Only strip if first segment is exactly "workspace"
+        if parts and parts[0] == "workspace":
+            # Reconstruct path without first segment
+            if len(parts) > 1:
+                return str(Path(*parts[1:]))
+            else:
+                # Just "workspace" with nothing after
+                return ""
+        
         return path_str
     
     def _is_sensitive_file(self, path: Path) -> bool:
