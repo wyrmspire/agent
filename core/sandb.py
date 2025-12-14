@@ -48,6 +48,15 @@ class Workspace:
         The agent can READ files from the project root but can only WRITE
         to the workspace directory. Sensitive files (.env, secrets) are blocked.
     
+    Standard bins (Phase 1.5):
+        workspace/repos/   - Cloned repositories
+        workspace/runs/    - Run outputs by run_id
+        workspace/notes/   - Human-readable summaries
+        workspace/patches/ - Patch protocol files
+        workspace/data/    - Data files for analysis
+        workspace/queue/   - Task queue (auto-managed)
+        workspace/chunks/  - Chunk index (auto-managed)
+    
     Example:
         ws = Workspace("/home/user/agent/workspace")
         safe_path = ws.resolve("data/prices.csv")  # OK - workspace
@@ -55,12 +64,24 @@ class Workspace:
         ws.resolve("../servr/api.py")  # Raises WorkspaceError
     """
     
+    # Standard workspace bins (Phase 1.5)
+    STANDARD_BINS = {
+        "repos": "Cloned repositories",
+        "runs": "Run outputs organized by run_id",
+        "notes": "Human-readable summaries and analysis",
+        "patches": "Patch protocol files",
+        "data": "Data files for analysis",
+        "queue": "Task queue files (auto-managed)",
+        "chunks": "Chunk index files (auto-managed)",
+    }
+    
     def __init__(
         self,
         workspace_root: Union[str, Path],
         max_workspace_size_gb: float = 5.0,
         min_free_ram_percent: float = 10.0,
         allow_project_read: bool = True,
+        create_standard_bins: bool = True,
     ):
         """Initialize workspace with root directory and resource limits.
         
@@ -69,6 +90,7 @@ class Workspace:
             max_workspace_size_gb: Maximum workspace size in GB (default: 5GB)
             min_free_ram_percent: Minimum free RAM percentage (default: 10%)
             allow_project_read: Allow read-only access to project files (default: True)
+            create_standard_bins: Create standard bin directories (default: True)
         """
         self.root = Path(workspace_root).resolve()
         self.max_workspace_size_bytes = int(max_workspace_size_gb * 1024 * 1024 * 1024)
@@ -77,6 +99,11 @@ class Workspace:
         
         # Create workspace if it doesn't exist
         self.root.mkdir(parents=True, exist_ok=True)
+        
+        # Create standard bins (Phase 1.5)
+        if create_standard_bins:
+            for bin_name in self.STANDARD_BINS:
+                (self.root / bin_name).mkdir(exist_ok=True)
         
         # Project root is parent of workspace
         self._project_root = self.root.parent
@@ -115,6 +142,44 @@ class Workspace:
     def project_root(self) -> Path:
         """Get the project root directory (parent of workspace)."""
         return self._project_root
+    
+    def get_run_dir(self, run_id: str) -> Path:
+        """Get or create a run-specific output directory.
+        
+        Args:
+            run_id: Unique run identifier
+            
+        Returns:
+            Path to the run directory (created if needed)
+        """
+        run_dir = self.root / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+    
+    def validate_path_in_bin(self, path: Path) -> Optional[str]:
+        """Check if a path is in a standard bin.
+        
+        Args:
+            path: Path to check
+            
+        Returns:
+            Bin name if path is in a standard bin, None otherwise
+        """
+        try:
+            # Make path absolute and resolve
+            if not path.is_absolute():
+                path = self.root / path
+            resolved = path.resolve()
+            
+            # Get path relative to workspace
+            rel = resolved.relative_to(self.root)
+            first_part = rel.parts[0] if rel.parts else None
+            
+            if first_part in self.STANDARD_BINS:
+                return first_part
+            return None
+        except ValueError:
+            return None
     
     @property
     def base_path(self) -> Path:

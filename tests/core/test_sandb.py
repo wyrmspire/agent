@@ -85,15 +85,20 @@ def test_list_contents(temp_workspace):
     # Create some files and directories
     (temp_workspace.root / "file1.txt").write_text("content1")
     (temp_workspace.root / "file2.txt").write_text("content2")
-    (temp_workspace.root / "subdir").mkdir()
+    (temp_workspace.root / "subdir").mkdir(exist_ok=True)
     
     contents = temp_workspace.list_contents()
-    
-    assert len(contents) == 3
     names = [p.name for p in contents]
+    
+    # Should include standard bins (7) + our 3 new items
+    # But subdir might already exist if it's in STANDARD_BINS, so check files
     assert "file1.txt" in names
     assert "file2.txt" in names
-    assert "subdir" in names
+    assert "subdir" in names or "subdir" in Workspace.STANDARD_BINS
+    
+    # Should have at least the standard bins
+    for bin_name in Workspace.STANDARD_BINS:
+        assert bin_name in names
 
 
 def test_get_relative_path(temp_workspace):

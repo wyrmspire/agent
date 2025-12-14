@@ -127,12 +127,13 @@ IMPORTANT:
       <tool name="queue_next">{}</tool>
       - Get next task, complete it, then checkpoint
    
-   c) CHECKPOINT ON COMPLETION
+   c) CHECKPOINT ON COMPLETION (ALL FIELDS REQUIRED)
       <tool name="queue_done">{
         "task_id": "task_0001",
-        "what_was_done": "Description",
+        "what_was_done": "Description of completed work",
         "what_changed": ["file1.py", "file2.py"],
-        "what_next": "Next logical step",
+        "what_next": "Next logical step or 'None - task complete'",
+        "blockers": [],
         "citations": ["chunk_abc123"]
       }</tool>
    
@@ -144,10 +145,48 @@ IMPORTANT:
         "blockers": ["Missing dependency", "Need clarification"]
       }</tool>
 
-=== WORKSPACE RULES ===
+=== MANDATORY QUEUE RULES (Phase 1.4) ===
+
+WHEN QUEUE IS REQUIRED (Not Optional):
+- Task involves MORE than 5 files
+- Task requires MORE than 10 tool calls
+- Task has multiple phases (research → implement → test)
+- Task is "large", "complex", or "multi-step"
+- User explicitly requests queued execution
+
+WHEN QUEUE IS OPTIONAL:
+- Simple questions (search_chunks + answer)
+- Single file reads/writes
+- Quick shell commands
+- Patch proposals for ONE file
+
+IF YOU REACH STEP 15/20:
+1. STOP attempting inline completion
+2. Create queue task for remaining work: queue_add
+3. Checkpoint progress: queue_done or queue_fail
+4. Report: "Task queued for continuation in next cycle"
+
+NEVER say "we ran out of steps" - always queue and checkpoint instead.
+
+=== WORKSPACE HYGIENE (Phase 1.5) ===
+
+STANDARD DIRECTORIES (use these, NOT ad-hoc folders):
+- workspace/repos/     → Cloned repositories
+- workspace/runs/      → Run outputs (organize by run_id)
+- workspace/notes/     → Human-readable summaries
+- workspace/patches/   → Patch protocol files
+- workspace/data/      → Data files for analysis
+- workspace/queue/     → Task queue (auto-managed)
+- workspace/chunks/    → Chunk index (auto-managed)
+
+HYGIENE RULES:
+1. NEVER create top-level folders like data2/, tmp2/, output/
+2. Put run outputs in workspace/runs/<run_id>/
+3. Put notes/summaries in workspace/notes/
+4. Use workspace/data/ for data files
 
 WORKSPACE ISOLATION:
-- workspace/ = Your writable area (notes, outputs, patches, queue)
+- workspace/ = Your writable area
 - Project files = READ-ONLY unless using Patch Protocol
 - write_file only works in workspace/
 
@@ -175,11 +214,12 @@ ANTI-PATTERNS TO AVOID:
 ❌ Writing code without running tests
 ❌ Ignoring tool failures or blocked messages
 ❌ Making large changes without Task Queue checkpoints
+❌ Creating ad-hoc folders outside standard bins
 
 TOOL BUDGET:
-- You have limited tool calls per step
+- You have limited tool calls per step (default: 20)
 - Plan before acting
-- If at limit, summarize progress for next step
+- At step 15+, consider queueing remaining work
 """
     
     if tools:
