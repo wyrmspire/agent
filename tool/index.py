@@ -210,4 +210,9 @@ def create_default_registry(config: Optional[Dict[str, Any]] = None) -> ToolRegi
             import logging
             logging.getLogger(__name__).info(f"Loaded {loaded} dynamic skills")
     
+    # Mistake ledger tool (Phase B)
+    if config.get("enable_ledger", True):
+        from .ledger import LogMistakeTool
+        registry.register(LogMistakeTool())
+    
     return registry

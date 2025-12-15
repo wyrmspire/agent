@@ -44,7 +44,23 @@ def create_system_prompt(
 
 Your goal is to help the user accomplish their task efficiently.
 
-PLATFORM: Windows (CMD shell)
+=== OPERATING MANUAL ===
+
+PLAYBOOK: Read workspace/playbook.md for detailed rules and tool templates.
+LEDGER: Consult workspace/ledger.md before retrying any failed tool.
+
+CORE LOOP (every turn):
+1. Identify mode → planner (no tools) or builder (tools allowed)
+2. Preflight → tool allowed? path exists? file type/size OK?
+3. Act → batch 1-3 low-risk calls if plan is clear
+4. Verify → only for mkdir, config files, or previously failed ops
+5. If fail twice → STOP + replan + log to ledger
+
+MODE RULES:
+- "no acting" / "planner mode" → NO tools, output plan only
+- "builder mode" → tools allowed, follow preflight → act → verify
+
+=== PLATFORM: Windows (CMD shell) ===
 For shell commands, use Windows syntax:
 - dir (not ls)
 - copy (not cp)
@@ -68,6 +84,9 @@ IMPORTANT:
 - Use "." for current directory, not absolute paths
 - Arguments must be valid JSON inside the tool tag
 - Only call ONE tool at a time and wait for the result
+
+CIRCUIT BREAKER:
+Same tool + same args fails twice → STOP retrying. Try a DIFFERENT approach.
 
 ERROR RECOVERY:
 If a tool fails:
@@ -263,6 +282,46 @@ WHEN TO USE:
 - Looking for best practices or conventions
 - Avoiding "reinventing the wheel" bugs
 
+=== PATCH PROTOCOL (Phase 6 Clarity) ===
+
+IMPORTANT: There are TWO ways to create files:
+
+1. WORKSPACE FILES (immediate, no approval):
+   - Use write_file to create/edit files in workspace/
+   - This includes workspace/skills/, workspace/notes/, workspace/data/
+   - These take effect immediately
+
+2. PROJECT FILES (requires approval):
+   - Use create_patch to PROPOSE changes to project files (tool/, core/, flow/)
+   - Patches are saved for human review - they are NOT auto-applied
+   - Do NOT wait for patches to be applied - continue with other work
+   - The user will apply patches manually when ready
+
+ANTI-PATTERN:
+❌ "Waiting for the patch to be applied..." - patches need manual approval
+✅ "I proposed changes via create_patch. Continuing with workspace work..."
+
+=== PYEXE GUIDANCE (Phase 6) ===
+
+CRITICAL RULES for pyexe (Python execution):
+
+1. EACH CALL IS INDEPENDENT
+   - Variables from one pyexe call do NOT persist to the next
+   - You must re-import libraries each call
+   - You must re-load data each call
+
+2. USE PYTHON SYNTAX, NOT JSON
+   - Use True/False (Python), NOT true/false (JSON)
+   - Use None (Python), NOT null (JSON)
+   
+3. PRINT YOUR RESULTS
+   - Always print() what you want to see
+   - Return values are not shown
+
+ANTI-PATTERNS:
+❌ while true:  →  ✅ while True:
+❌ if result == null:  →  ✅ if result is None:
+
 === FRACTAL PLANNING PROTOCOL (Phase 1.8) ===
 
 For complex projects, use STRUCTURED DECOMPOSITION:
@@ -330,8 +389,30 @@ Project: {project_context.get('name', 'Unknown')}
 State: {project_context.get('state', 'Unknown')}
 Description: {project_context.get('description', 'No description')}
 
-Current Tasks:
+=== WORKSPACE FILES (Phase 2 Context Injection) ===
+CWD: {project_context.get('cwd', 'Unknown')}
+PROJECT ROOT: {project_context.get('project_root', 'Unknown')}
+WRITABLE DIR: {project_context.get('workspace_dir', 'workspace/')}
+
 """
+        # Add data files
+        data_files = project_context.get('data_files', [])
+        if data_files:
+            project_section += "DATA FILES:\n"
+            for f in data_files:
+                if f.get('type') == 'directory':
+                    project_section += f"  📁 {f['path']} ({f.get('file_count', 0)} files)\n"
+                else:
+                    project_section += f"  📄 {f['path']} ({f.get('size_human', 'unknown')}) [absolute: {f.get('absolute_path', '')}]\n"
+        else:
+            project_section += "DATA FILES: (none)\n"
+        
+        # Add standard dirs
+        std_dirs = project_context.get('standard_dirs', [])
+        if std_dirs:
+            project_section += f"\nSTANDARD DIRS: {', '.join(std_dirs)}\n"
+        
+        project_section += "\nCurrent Tasks:\n"
         tasks = project_context.get('tasks', [])
         if tasks:
             for task in tasks:
@@ -348,7 +429,27 @@ Current Tasks:
             for note in recent_notes[-5:]:  # Last 5 entries
                 project_section += f"  {note}\n"
         
+        # Phase 5: Last session context
+        last_session = project_context.get('last_session')
+        if last_session:
+            project_section += f"\n=== LAST SESSION ===\n{last_session}\n"
+        
+        # Phase 5: Available skills
+        skills = project_context.get('skills', [])
+        if skills:
+            project_section += f"\n=== AVAILABLE SKILLS ===\nIn workspace/skills/: {', '.join(skills)}\nUse with: from skills.<name> import <function>\n"
+        
         project_section += """
+=== PATH GUIDANCE ===
+IMPORTANT: When accessing data files, use the ABSOLUTE paths shown above.
+For pyexe: Use absolute paths like open('C:/agent/workspace/data/file.json')
+For shell: Use relative paths from CWD like 'workspace/data/file.json'
+
+=== SKILLS FOLDER ===
+Create reusable tools in `workspace/skills/` (NOT `tool/` which is read-only).
+Example: Create `workspace/skills/yfinance.py` then import it in pyexe.
+To promote to real tool: use Patch Protocol with create_patch.
+
 When working on tasks:
 1. Check the current project state and tasks
 2. Reference the Lab Notebook for previous findings

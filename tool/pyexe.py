@@ -51,7 +51,7 @@ class PythonReplTool(BaseTool):
     def __init__(
         self,
         workspace: Optional[Workspace] = None,
-        timeout: float = 60.0,
+        timeout: float = 180.0,  # Increased from 60s for large data loading
         session_id: Optional[str] = None,
     ):
         """Initialize Python REPL tool.

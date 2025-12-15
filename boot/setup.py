@@ -83,9 +83,10 @@ def load_config() -> Dict[str, Any]:
         # Gemini config (reads from .env, NOT .env.example)
         "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
         "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "gemini_escalation_model": os.getenv("GEMINI_ESCALATION_MODEL", ""),
         
         # Agent config
-        "max_steps": int(os.getenv("AGENT_MAX_STEPS", "20")),
+        "max_steps": int(os.getenv("AGENT_MAX_STEPS", "50")),
         "temperature": float(os.getenv("AGENT_TEMPERATURE", "0.7")),
         "max_tokens": int(os.getenv("AGENT_MAX_TOKENS", "4096")),
         

@@ -294,6 +294,9 @@ class AgentJudge:
         - Writing to project files directly (outside workspace)
         - Not explaining why tests weren't run when budget prevented them
         
+        NOTE: Patch protocol is ONLY for project files (outside workspace/).
+        For workspace files, write_file is the correct tool - no patch needed.
+        
         Args:
             steps: Execution steps so far
             
@@ -306,6 +309,7 @@ class AgentJudge:
         # Check: Did agent propose changes without creating a patch?
         proposes_change = False
         has_create_patch = False
+        target_is_workspace = False
         
         # Keywords that indicate proposing changes
         propose_keywords = [
@@ -320,20 +324,30 @@ class AgentJudge:
                 content_lower = step.content.lower()
                 if any(keyword in content_lower for keyword in propose_keywords):
                     proposes_change = True
+                    # Check if the proposed change is for workspace files
+                    if "workspace/" in content_lower or "workspace\\" in content_lower:
+                        target_is_workspace = True
             
-            # Check if patch was created
+            # Check if patch was created OR if write_file was used for workspace
             if step.tool_calls:
                 for tc in step.tool_calls:
                     if tc.name == "create_patch":
                         has_create_patch = True
+                    # If write_file targets workspace, that's fine - no patch needed
+                    if tc.name == "write_file":
+                        path = str(tc.arguments.get("path", "") or tc.arguments.get("file_path", ""))
+                        if "workspace" in path.lower():
+                            target_is_workspace = True
         
-        if proposes_change and not has_create_patch:
+        # Only enforce patch discipline for NON-workspace files
+        if proposes_change and not has_create_patch and not target_is_workspace:
             return Judgment(
                 passed=False,
-                reason="Proposed changes without creating a patch",
+                reason="Proposed changes to project files without creating a patch",
                 severity="warning",
                 suggestion="DO THIS NEXT: Use create_patch tool to propose changes via patch protocol.",
             )
+
         
         # Check: Did agent try to write to project files directly?
         write_tools = ["write_file"]

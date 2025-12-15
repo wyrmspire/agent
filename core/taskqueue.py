@@ -167,8 +167,8 @@ class TaskQueue:
         inputs: Optional[List[str]] = None,
         acceptance: Optional[str] = None,
         parent_id: Optional[str] = None,
-        max_tool_calls: int = 20,
-        max_steps: int = 10,
+        max_tool_calls: int = 30,  # Increased from 20
+        max_steps: int = 50,  # Default step limit per task
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Add a new task to the queue.

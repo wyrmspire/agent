@@ -73,11 +73,22 @@ async def main():
                 return 1
             
             from gate.gemini import GeminiGateway
-            print(f"[GEMINI] Using Gemini API ({config.get('gemini_model', 'gemini-2.5-flash')})")
-            gateway = GeminiGateway(
-                api_key=api_key,
-                model=config.get("gemini_model", "gemini-2.5-flash"),
-            )
+            
+            primary_model = config.get("gemini_model", "gemini-2.5-flash")
+            escalation_model = config.get("gemini_escalation_model", "")
+            
+            if escalation_model:
+                # Phase 4: Use EscalatingGateway with model switching
+                from gate.escalating import EscalatingGateway
+                print(f"[GEMINI] Using Escalating Gateway: primary={primary_model}, escalation={escalation_model}")
+                
+                primary_gateway = GeminiGateway(api_key=api_key, model=primary_model)
+                escalation_gateway = GeminiGateway(api_key=api_key, model=escalation_model)
+                gateway = EscalatingGateway(primary_gateway, escalation_gateway)
+            else:
+                # Single model mode
+                print(f"[GEMINI] Using Gemini API ({primary_model})")
+                gateway = GeminiGateway(api_key=api_key, model=primary_model)
             
             # Health check
             print("Checking Gemini API...")
@@ -184,7 +195,13 @@ async def main():
     
     # Add system message
     from core.types import Message
-    system_prompt = create_system_prompt(tools.get_tool_definitions())
+    from core.context import get_workspace_context
+    
+    # Build workspace context for prompt injection (Phase 2)
+    project_context = get_workspace_context("workspace")
+    print(f"[OK] Built workspace context: {len(project_context.get('data_files', []))} data files, {len(project_context.get('standard_dirs', []))} dirs")
+    
+    system_prompt = create_system_prompt(tools.get_tool_definitions(), project_context=project_context)
     state.conversation.add_message(Message(
         role=MessageRole.SYSTEM,
         content=system_prompt,
@@ -231,6 +248,24 @@ async def main():
             print(f"\n\n[ERROR] {e}")
             import traceback
             traceback.print_exc()
+    
+    # Phase 5: Generate session summary before exit
+    try:
+        if state.execution.current_step > 0:  # Only if work was done
+            print("\n[Generating session summary...]")
+            summary_result = await loop.run(state, 
+                "Briefly summarize this session in 2-3 sentences: what was accomplished, what's pending, key learnings. Be concise."
+            )
+            if summary_result.success:
+                sessions_dir = Path("workspace/sessions")
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "latest.md").write_text(
+                    f"# Last Session Summary\n\n{summary_result.final_answer}\n",
+                    encoding="utf-8"
+                )
+                print(f"[OK] Session summary saved")
+    except Exception as e:
+        print(f"[WARN] Could not save session summary: {e}")
     
     # Cleanup
     await gateway.close()

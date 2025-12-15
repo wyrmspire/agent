@@ -58,7 +58,13 @@ class MemoryTool(BaseTool):
     
     @property
     def description(self) -> str:
-        return "Store and retrieve information from long-term memory. Operations: 'store' (save info), 'search' (find relevant memories)"
+        return (
+            "Store and retrieve semantic knowledge from long-term memory. "
+            "Operations: 'store' (save facts), 'search' (find relevant memories), "
+            "'reflect' (capture work summary), 'learn' (store insight from failure). "
+            "USE MEMORY FOR: facts, discoveries, how things work. "
+            "USE LEDGER FOR: operational rules/mistakes (trigger→cause→rule→test format)."
+        )
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -68,12 +74,12 @@ class MemoryTool(BaseTool):
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["store", "search"],
-                    "description": "Operation to perform: 'store' or 'search'"
+                    "enum": ["store", "search", "reflect", "learn"],
+                    "description": "Operation: 'store' (save), 'search' (find), 'reflect' (store reflection), 'learn' (store learning from failed query)"
                 },
                 "content": {
                     "type": "string",
-                    "description": "For 'store': content to remember. For 'search': query text"
+                    "description": "For 'store'/'reflect'/'learn': content to remember. For 'search': query text"
                 },
                 "metadata": {
                     "type": "object",
@@ -110,11 +116,15 @@ class MemoryTool(BaseTool):
                 return await self._store_memory(content, metadata)
             elif operation == "search":
                 return await self._search_memory(content, metadata)
+            elif operation == "reflect":
+                return await self._reflect(content, metadata)
+            elif operation == "learn":
+                return await self._learn(content, metadata)
             else:
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error=f"Unknown operation: {operation}. Use 'store' or 'search'",
+                    error=f"Unknown operation: {operation}. Use 'store', 'search', 'reflect', or 'learn'",
                     success=False,
                 )
         
@@ -233,6 +243,141 @@ class MemoryTool(BaseTool):
                 error=f"Search failed: {e}",
                 success=False,
             )
+    
+    async def _reflect(
+        self,
+        content: str,
+        metadata: Dict[str, Any],
+    ) -> ToolResult:
+        """Store a reflection about completed work.
+        
+        Reflections are triggered periodically to capture patterns and learnings.
+        
+        Args:
+            content: Reflection content (what was done, what worked)
+            metadata: Optional metadata
+            
+        Returns:
+            ToolResult with storage confirmation
+        """
+        from datetime import datetime
+        
+        # Add reflection-specific metadata
+        metadata["category"] = "reflection"
+        metadata["timestamp"] = datetime.now().isoformat()
+        metadata["type"] = "periodic_reflection"
+        
+        result = await self._store_memory(content, metadata)
+        
+        if result.success:
+            result.output = f"🪞 Reflection stored:\n{content[:200]}..."
+        
+        return result
+    
+    async def _learn(
+        self,
+        content: str,
+        metadata: Dict[str, Any],
+    ) -> ToolResult:
+        """Store a learning from a failed query or discovery.
+        
+        Learnings are triggered when the agent figures out something
+        it didn't know before (e.g., after an empty search result).
+        
+        Auto-detects if content looks like an operational rule and
+        suggests using log_mistake instead.
+        
+        Args:
+            content: Learning content (what was discovered)
+            metadata: Optional metadata (may include failed_query)
+            
+        Returns:
+            ToolResult with storage confirmation
+        """
+        from datetime import datetime
+        
+        # Check if this looks like an operational rule (should use ledger)
+        content_lower = content.lower()
+        rule_indicators = [
+            "rule:", "don't ", "do not ", "always ", "never ", 
+            "trigger:", "root cause:", "next time",
+        ]
+        is_rule_like = any(indicator in content_lower for indicator in rule_indicators)
+        
+        # Add learning-specific metadata
+        metadata["category"] = "learning"
+        metadata["timestamp"] = datetime.now().isoformat()
+        metadata["trigger"] = metadata.get("trigger", "discovery")
+        
+        # Try to extract structured playbook from content
+        playbook = self._extract_playbook(content, metadata)
+        if playbook:
+            metadata["playbook"] = playbook
+        
+        result = await self._store_memory(content, metadata)
+        
+        if result.success:
+            output = f"🧠 Learning stored:\n{content[:200]}...\n\nThis knowledge will be available for future queries."
+            
+            # If it looked like a rule, suggest ledger
+            if is_rule_like:
+                output += (
+                    "\n\n💡 TIP: This looks like an operational rule. "
+                    "Consider also using log_mistake(trigger='...', root_cause='...', rule='...') "
+                    "to add it to the structured ledger for easier lookup."
+                )
+            
+            result.output = output
+        
+        return result
+    
+    def _extract_playbook(self, content: str, metadata: Dict[str, Any]) -> Dict[str, str]:
+        """Extract structured playbook fields from learning content.
+        
+        Looks for patterns like:
+        - TRIGGER: ...
+        - SYMPTOM: ...
+        - ROOT CAUSE: ...
+        - SOLUTION: ...
+        - TEST: ...
+        
+        Returns:
+            Dict with extracted fields, or empty dict if no structure found
+        """
+        import re
+        
+        playbook = {
+            "trigger": metadata.get("trigger", ""),
+            "failed_query": metadata.get("failed_query", ""),
+            "symptom": "",
+            "root_cause": "",
+            "solution": "",
+            "test": "",
+        }
+        
+        # Try to extract structured fields
+        patterns = {
+            "trigger": r"TRIGGER:\s*(.+?)(?:\n|$)",
+            "symptom": r"SYMPTOM:\s*(.+?)(?:\n|$)",
+            "root_cause": r"ROOT[\s_]?CAUSE:\s*(.+?)(?:\n|$)",
+            "solution": r"SOLUTION:\s*(.+?)(?:\n|$)",
+            "test": r"TEST:\s*(.+?)(?:\n|$)",
+        }
+        
+        content_upper = content.upper()
+        has_structure = any(pattern.split(":")[0] + ":" in content_upper for pattern in patterns)
+        
+        if has_structure:
+            for field, pattern in patterns.items():
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    playbook[field] = match.group(1).strip()
+        else:
+            # Freeform - store as symptom
+            playbook["symptom"] = content[:500]
+        
+        # Only return if we found something
+        return playbook if any(v for v in playbook.values()) else {}
     
     def get_stats(self) -> Dict[str, Any]:
         """Get memory statistics.

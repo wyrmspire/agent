@@ -99,16 +99,24 @@ class SafetyRule(Rule):
         self.forbidden_patterns = forbidden_patterns
     
     def evaluate(self, tool_call: ToolCall, context: Dict[str, Any]) -> RuleResult:
-        """Check if tool call matches any forbidden patterns."""
+        """Check if tool call matches any forbidden patterns.
+        
+        Only checks path-related arguments, NOT content. Otherwise writing
+        code that mentions '.env' would be blocked.
+        """
+        # Arguments that should be checked for forbidden patterns
+        PATH_ARGS = {"path", "file_path", "target", "destination", "source", "command", "cmd"}
+        
         # Check tool name
         for pattern in self.forbidden_patterns:
             if pattern in tool_call.name:
                 return RuleResult.DENY
             
-            # Check arguments
-            for arg_value in tool_call.arguments.values():
-                if isinstance(arg_value, str) and pattern in arg_value:
-                    return RuleResult.DENY
+            # Only check path-related arguments, not content
+            for arg_name, arg_value in tool_call.arguments.items():
+                if arg_name.lower() in PATH_ARGS:
+                    if isinstance(arg_value, str) and pattern in arg_value:
+                        return RuleResult.DENY
         
         return RuleResult.ALLOW
     
@@ -207,7 +215,7 @@ DEFAULT_RULES = [
             "/etc/passwd",
             "/etc/shadow",
             "~/.ssh/id_rsa",
-            ".env",
+            "/.env",  # Use path separator to avoid matching 'environment', 'envfile', etc.
         ]
     ),
 ]

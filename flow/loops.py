@@ -40,6 +40,7 @@ from core.sandb import get_default_workspace
 from gate.bases import ModelGateway
 from tool.index import ToolRegistry
 from flow.judge import AgentJudge
+from flow.preflight import PreflightChecker, create_preflight_checker
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class AgentLoop:
         gateway: ModelGateway,
         tools: ToolRegistry,
         rule_engine: RuleEngine,
-        max_steps: int = 20,
+        max_steps: int = 50,
         temperature: float = 0.7,
         enable_judge: bool = True,  # Phase 0.5: Judge guidance
     ):
@@ -90,6 +91,9 @@ class AgentLoop:
         self.max_steps = max_steps
         self.temperature = temperature
         self.judge = AgentJudge() if enable_judge else None
+        
+        # Phase A: Preflight and Circuit Breaker
+        self.preflight = create_preflight_checker()
         
         # Phase 0.8B: Active Task Tracking
         self.workspace_root = Path(get_default_workspace().base_path)
@@ -218,6 +222,35 @@ class AgentLoop:
             step_num = state.execution.current_step + 1
             logger.info(f"Step {step_num}/{max_steps_limit}")
             
+            # Phase 2B: Learning enforcement - check if deadline passed
+            if state.execution.learning_required_by_step is not None:
+                if step_num >= state.execution.learning_required_by_step:
+                    from flow.learning_nudge import format_pending_failures, create_playbook_template
+                    failures_summary = format_pending_failures(state.execution.pending_failures)
+                    template = ""
+                    if state.execution.pending_failures:
+                        template = create_playbook_template(state.execution.pending_failures[0])
+                    
+                    state.conversation.add_message(Message(
+                        role=MessageRole.SYSTEM,
+                        content=(
+                            f"⚠️ LEARNING REQUIRED: You have pending failures that need reflection.\n\n"
+                            f"{failures_summary}\n\n"
+                            f"{template}\n"
+                            f"Use log_mistake or memory(operation='learn') NOW before continuing."
+                        ),
+                    ))
+                    logger.warning(f"Learning deadline passed at step {step_num}")
+            
+            # Phase 3: Periodic reflection trigger
+            reflection_interval = state.execution.reflection_step_interval
+            if step_num > 0 and step_num % reflection_interval == 0:
+                logger.info(f"Reflection point at step {step_num}")
+                state.conversation.add_message(Message(
+                    role=MessageRole.SYSTEM,
+                    content="🪞 REFLECTION POINT: You've completed several steps. Briefly summarize what you've accomplished and store it using memory(operation='reflect', content='...').",
+                ))
+            
             # Get tool definitions
             tool_defs = self.tools.get_tool_definitions() if self.tools.count > 0 else None
             
@@ -252,10 +285,85 @@ class AgentLoop:
                     ))
                     continue
                 
+                # Phase B: Enhanced preflight check with intent tracking and alternatives
+                mode = getattr(state.execution, 'mode', 'builder')
+                model_output = response.content or ""  # For OVERRIDE detection
+                preflight_result = self.preflight.check(
+                    response.tool_calls, 
+                    mode=mode,
+                    model_output=model_output,
+                )
+                
+                if not preflight_result.passed:
+                    logger.warning(f"Preflight failed: {preflight_result.failures}")
+                    # Inject failures as system message with alternatives
+                    failure_msg = "\n\n".join(preflight_result.failures)
+                    
+                    # Check if forced plan mode (intent exhausted)
+                    if preflight_result.forced_plan_mode:
+                        state.conversation.add_message(Message(
+                            role=MessageRole.SYSTEM,
+                            content=(
+                                f"🛑 FORCED PLAN MODE:\n{failure_msg}\n\n"
+                                f"You MUST now output a text plan with:\n"
+                                f"1. What failed and why\n"
+                                f"2. What we know for certain\n"
+                                f"3. Next minimal experiment to try\n"
+                                f"4. Success criteria"
+                            ),
+                        ))
+                    else:
+                        state.conversation.add_message(Message(
+                            role=MessageRole.SYSTEM,
+                            content=f"🛑 PREFLIGHT BLOCKED:\n{failure_msg}",
+                        ))
+                    
+                    # Add THINK step to force replanning
+                    state.execution.add_step(Step(
+                        step_type=StepType.THINK,
+                        content=f"Preflight blocked: {failure_msg}",
+                    ))
+                    continue
+                
+                # Apply safe path rewrites before execution
+                from flow.preflight import RewriteSafety
+                for rewrite in preflight_result.rewrites:
+                    if rewrite.safety == RewriteSafety.SAFE:
+                        # Find the tool call and apply rewrite
+                        for tc in response.tool_calls:
+                            if tc.id == rewrite.tool_call_id:
+                                old_val = tc.arguments.get(rewrite.argument_name, "")
+                                tc.arguments[rewrite.argument_name] = rewrite.normalized
+                                logger.info(
+                                    f"AUTO-REWRITE {rewrite.argument_name}: "
+                                    f"{rewrite.original} → {rewrite.normalized} "
+                                    f"({rewrite.reason})"
+                                )
+                                break
+                
+                # Inject preflight warnings with alternatives
+                if preflight_result.warnings:
+                    warning_msg = "\n".join(f"⚠️ {w}" for w in preflight_result.warnings)
+                    state.conversation.add_message(Message(
+                        role=MessageRole.SYSTEM,
+                        content=warning_msg,
+                    ))
+                    for warning in preflight_result.warnings:
+                        logger.info(f"Preflight warning: {warning}")
+                
                 # Execute tools (with per-tool budget enforcement)
                 # Pass incremented tool_calls_used to _execute_tools or update it after?
                 # We need to update our local counter.
                 tool_results, budget_hit = await self._execute_tools(state, response.tool_calls, tracer, active_task, tool_calls_used, max_tool_calls_limit)
+                
+                # Phase A: Record successes/failures in circuit breaker
+                for i, result in enumerate(tool_results):
+                    if i < len(response.tool_calls):
+                        tc = response.tool_calls[i]
+                        if result.success:
+                            self.preflight.circuit_breaker.record_success(tc)
+                        else:
+                            self.preflight.circuit_breaker.record_failure(tc, result.error or "Unknown error")
                 
                 # Update usage
                 tool_calls_used += len(tool_results)
@@ -287,6 +395,113 @@ class AgentLoop:
                         content=result.output if result.success else f"Error: {result.error}",
                         tool_call_id=result.tool_call_id,
                     ))
+                
+                # Phase 6: Error pattern detection and nudges
+                for i, result in enumerate(tool_results):
+                    if not result.success and result.error:
+                        error_msg = result.error.lower()
+                        nudge = None
+                        
+                        # Common pyexe errors
+                        if "name 'true' is not defined" in error_msg:
+                            nudge = "💡 HINT: Use Python's True/False, not JSON's true/false."
+                        elif "name 'false' is not defined" in error_msg:
+                            nudge = "💡 HINT: Use Python's True/False, not JSON's true/false."
+                        elif "name 'null' is not defined" in error_msg or "name 'none' is not defined" in error_msg:
+                            nudge = "💡 HINT: Use Python's None, not JSON's null."
+                        elif "is not defined" in error_msg and "pyexe" in (response.tool_calls[i].name if i < len(response.tool_calls) else ""):
+                            nudge = "💡 HINT: Each pyexe call is independent. Variables don't persist between calls. Re-import and re-load data."
+                        elif "patch" in error_msg and "required" in error_msg:
+                            nudge = "💡 HINT: create_patch needs 'file', 'plan', and 'diff' arguments. For workspace files, use write_file instead."
+                        
+                        if nudge:
+                            logger.info(f"Error nudge: {nudge}")
+                            state.conversation.add_message(Message(
+                                role=MessageRole.SYSTEM,
+                                content=nudge,
+                            ))
+                        
+                        # Phase 2B: Track failure for learning enforcement
+                        tc = response.tool_calls[i] if i < len(response.tool_calls) else None
+                        if tc:
+                            state.execution.pending_failures.append({
+                                "tool": tc.name,
+                                "error": result.error[:200] if result.error else "unknown",
+                                "args": {k: str(v)[:50] for k, v in list(tc.arguments.items())[:3]},
+                                "step": state.execution.current_step,
+                            })
+                            
+                            # Set deadline: must reflect within 3 steps
+                            if state.execution.learning_required_by_step is None:
+                                deadline = state.execution.current_step + 3
+                                state.execution.learning_required_by_step = deadline
+                                logger.info(f"Learning deadline set: must learn by step {deadline}")
+                                
+                                # Get contextual learning prompt
+                                from flow.learning_nudge import get_learning_prompt
+                                from flow.preflight import CircuitBreakerState
+                                error_class = CircuitBreakerState()._classify_error(result.error or "")
+                                learning_prompt = get_learning_prompt(error_class, tc.name, result.error or "")
+                                
+                                state.conversation.add_message(Message(
+                                    role=MessageRole.SYSTEM,
+                                    content=f"{learning_prompt}\n\nYou have {3} steps to reflect on this.",
+                                ))
+                
+                # Phase 3: Learning mode trigger
+                # Check if memory search returned empty results
+                for i, result in enumerate(tool_results):
+                    if i < len(response.tool_calls):
+                        tc = response.tool_calls[i]
+                        if tc.name == "memory" and result.success:
+                            if "No memories found" in result.output:
+                                state.execution.heavy_learning_mode = True
+                                state.execution.last_failed_query = tc.arguments.get("content", "")
+                                logger.info(f"Learning mode triggered: no memories for '{state.execution.last_failed_query}'")
+                                state.conversation.add_message(Message(
+                                    role=MessageRole.SYSTEM,
+                                    content=f"🧠 LEARNING MODE: No prior knowledge found for '{state.execution.last_failed_query[:50]}...'. After completing this task, use memory(operation='learn', content='...') to save what you figured out.",
+                                ))
+                            # Phase 4: Track learning for de-escalation
+                            if tc.arguments.get("operation") == "learn" and "Learning stored" in result.output:
+                                # Clear learning requirement - agent learned something!
+                                state.execution.pending_failures.clear()
+                                state.execution.learning_required_by_step = None
+                                logger.info("Learning completed, cleared pending failures")
+                                
+                                # Mark learning as stored for de-escalation check
+                                from gate.escalating import EscalatingGateway
+                                if isinstance(self.gateway, EscalatingGateway):
+                                    self.gateway.mark_learning_stored()
+                        
+                        # Also clear on log_mistake
+                        if tc.name == "log_mistake" and result.success:
+                            state.execution.pending_failures.clear()
+                            state.execution.learning_required_by_step = None
+                            logger.info("Mistake logged, cleared pending failures")
+                
+                # Phase 4: Escalation tracking
+                from gate.escalating import EscalatingGateway
+                if isinstance(self.gateway, EscalatingGateway):
+                    # Count failures vs successes
+                    for result in tool_results:
+                        if result.success:
+                            self.gateway.record_success()
+                        else:
+                            escalated = self.gateway.record_failure()
+                            if escalated:
+                                state.conversation.add_message(Message(
+                                    role=MessageRole.SYSTEM,
+                                    content=f"🔺 ESCALATED: Switching to {self.gateway.escalation.model}. You are now using a more powerful model. Solve this problem, then use memory(operation='learn', content='...') to save what you figured out for next time.",
+                                ))
+                    
+                    # Check if we should de-escalate
+                    if self.gateway.should_de_escalate():
+                        self.gateway.de_escalate()
+                        state.conversation.add_message(Message(
+                            role=MessageRole.SYSTEM,
+                            content=f"🔻 DE-ESCALATED: Learning captured. Switching back to {self.gateway.primary.model}.",
+                        ))
                 
                 # If budget was hit mid-batch, inject guidance
                 if budget_hit:
@@ -348,9 +563,27 @@ class AgentLoop:
             
             return response.content
         
-        # Max steps reached
+        # Max steps reached - prompt to continue or cancel
         logger.warning(f"Max steps ({self.max_steps}) reached")
-        return "I've reached the maximum number of reasoning steps. Please try a simpler request."
+        print(f"\n{'='*60}")
+        print(f"⏸️  PAUSED: Reached {self.max_steps} steps.")
+        print(f"   Press ENTER to continue for another {self.max_steps} steps")
+        print(f"   Press ESC or type 'quit' to stop")
+        print(f"{'='*60}")
+        
+        try:
+            import sys
+            user_input = input("\n>>> ").strip().lower()
+            if user_input in ('quit', 'q', 'exit', 'stop', 'cancel'):
+                return "Task stopped by user at step limit."
+            
+            # User wants to continue - reset step counter and loop again
+            logger.info(f"User continued past step limit")
+            state.execution.current_step = 0
+            return await self._reasoning_loop(state, tracer)
+            
+        except (KeyboardInterrupt, EOFError):
+            return "Task cancelled by user."
     
     async def _execute_tools(
         self,
