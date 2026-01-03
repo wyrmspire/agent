@@ -70,6 +70,15 @@ For shell commands, use Windows syntax:
 - del (not rm)
 - Use backslash \\ for paths
 
+=== NPM/NODE COMMANDS ===
+ALWAYS use non-interactive flags to avoid prompts:
+- npx create-vite@latest . -- --template react  (auto-accepts)
+- npm init -y  (auto-yes)
+- npm install  (no prompts)
+- npx -y <package>  (auto-install)
+Commands that wait for user input will timeout.
+For create commands that may prompt, pipe yes: echo y | npx create-vite@latest . -- --template react
+
 CRITICAL - Tool Call Format:
 To call a tool, use this EXACT XML format:
 <tool name="tool_name">{"arg1": "value1", "arg2": "value2"}</tool>
@@ -161,8 +170,8 @@ Treat these as success and proceed to the next task.
         "objective": "What to accomplish",
         "inputs": ["chunk_id", "file.py"],
         "acceptance": "How to know it's done",
-        "max_tool_calls": 20,
-        "max_steps": 10
+        "max_tool_calls": 50,
+        "max_steps": 50
       }</tool>
    
    b) EXECUTE ONE AT A TIME
@@ -322,6 +331,12 @@ ANTI-PATTERNS:
 ❌ while true:  →  ✅ while True:
 ❌ if result == null:  →  ✅ if result is None:
 
+4. DEEP LEARNING FRAMEWORK
+   - ALWAYS use PyTorch, NEVER TensorFlow
+   - This system has a GPU - use .cuda() or .to('cuda')
+   - Never run pip install tensorflow
+   - For CNNs: torch.nn.Conv1d, torch.nn.Linear, etc.
+
 === FRACTAL PLANNING PROTOCOL (Phase 1.8) ===
 
 For complex projects, use STRUCTURED DECOMPOSITION:
@@ -445,10 +460,14 @@ IMPORTANT: When accessing data files, use the ABSOLUTE paths shown above.
 For pyexe: Use absolute paths like open('C:/agent/workspace/data/file.json')
 For shell: Use relative paths from CWD like 'workspace/data/file.json'
 
-=== SKILLS FOLDER ===
-Create reusable tools in `workspace/skills/` (NOT `tool/` which is read-only).
-Example: Create `workspace/skills/yfinance.py` then import it in pyexe.
-To promote to real tool: use Patch Protocol with create_patch.
+=== SKILLS vs PROJECT FILES ===
+SKILL (workspace/skills/) = Reusable utility, no hardcoded paths, can be imported
+  Example: skills/load_ohlcv_data.py - use with: from skills.load_ohlcv_data import ...
+  
+PROJECT FILE (workspace/<project>/) = Specific to one task, may have paths
+  Example: workspace/mlang/train_cnn.py
+
+NEVER put project-specific files in skills/. Skills are generic utilities only.
 
 When working on tasks:
 1. Check the current project state and tasks
@@ -456,6 +475,18 @@ When working on tasks:
 3. Update task status as you make progress
 4. Add observations to the Lab Notebook
 """
+        
+        # Phase 6: Project folders
+        project_folders = project_context.get('project_folders', [])
+        if project_folders:
+            project_section += "\n=== PROJECT FOLDERS ===\n"
+            for pf in project_folders:
+                project_section += f"  📁 {pf['path']} ({pf['file_count']} files)\n"
+        
+        # Phase 6: Directory tree
+        directory_tree = project_context.get('directory_tree', '')
+        if directory_tree:
+            project_section += f"\n=== WORKSPACE TREE ===\n{directory_tree}\n"
         
         base_prompt += project_section
     

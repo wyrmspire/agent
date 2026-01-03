@@ -87,7 +87,7 @@ class MemoryTool(BaseTool):
                     "additionalProperties": True
                 }
             },
-            "required": ["operation", "content"]
+            "required": ["operation"]  # content is required for store/learn/reflect, optional for search
         }
     
     async def execute(self, arguments: Dict[str, Any]) -> ToolResult:
@@ -104,11 +104,20 @@ class MemoryTool(BaseTool):
             content = arguments.get("content")
             metadata = arguments.get("metadata", {})
             
-            if not operation or not content:
+            if not operation:
                 return ToolResult(
                     tool_call_id="",
                     output="",
-                    error="Missing required parameters: 'operation' and 'content'",
+                    error="Missing required parameter: 'operation'",
+                    success=False,
+                )
+            
+            # Content is required for store/learn/reflect, optional for search
+            if operation in ("store", "learn", "reflect") and not content:
+                return ToolResult(
+                    tool_call_id="",
+                    output="",
+                    error=f"Missing required parameter: 'content' is required for operation '{operation}'",
                     success=False,
                 )
             
@@ -197,37 +206,52 @@ class MemoryTool(BaseTool):
         """Search long-term memory.
         
         Args:
-            query: Search query
-            metadata: Optional search filters
+            query: Search query (optional - if empty, returns filtered by metadata or all)
+            metadata: Optional search filters (project, category, etc.)
             
         Returns:
             ToolResult with search results
         """
         try:
-            # For now, use simple keyword matching
-            # TODO: Use actual embedding-based semantic search
-            
             results = []
-            query_lower = query.lower()
+            query_lower = (query or "").lower()
             
-            # Simple keyword search through stored documents
+            # Search through stored documents
             for doc_id, doc in self.vector_store.documents.items():
                 text = doc.get("text", "")
-                if query_lower in text.lower():
+                doc_metadata = doc.get("metadata", {})
+                
+                # Filter by metadata if provided
+                metadata_match = True
+                for key, value in metadata.items():
+                    if doc_metadata.get(key) != value:
+                        metadata_match = False
+                        break
+                
+                if not metadata_match:
+                    continue
+                
+                # If query is empty, return all (filtered by metadata)
+                # Otherwise, do keyword matching
+                if not query_lower or query_lower in text.lower():
                     results.append({
                         "id": doc_id,
                         "text": text,
-                        "metadata": doc.get("metadata", {}),
+                        "metadata": doc_metadata,
                     })
             
             if not results:
-                output = f"No memories found matching: {query}"
+                if metadata:
+                    output = f"No memories found with filters: {metadata}"
+                else:
+                    output = f"No memories found matching: {query or '(all)'}"
             else:
-                output = f"Found {len(results)} relevant memories:\n\n"
+                output = f"Found {len(results)} memories:\\n\\n"
                 for i, result in enumerate(results[:5], 1):  # Limit to 5
                     text = result["text"]
                     preview = text[:200] + ("..." if len(text) > 200 else "")
-                    output += f"{i}. {preview}\n\n"
+                    meta_str = ", ".join(f"{k}={v}" for k, v in result["metadata"].items() if k != "embedding")
+                    output += f"{i}. [{meta_str}] {preview}\\n\\n"
             
             return ToolResult(
                 tool_call_id="",

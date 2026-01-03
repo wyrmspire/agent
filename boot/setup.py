@@ -86,7 +86,7 @@ def load_config() -> Dict[str, Any]:
         "gemini_escalation_model": os.getenv("GEMINI_ESCALATION_MODEL", ""),
         
         # Agent config
-        "max_steps": int(os.getenv("AGENT_MAX_STEPS", "50")),
+        "max_steps": int(os.getenv("AGENT_MAX_STEPS", "100")),
         "temperature": float(os.getenv("AGENT_TEMPERATURE", "0.7")),
         "max_tokens": int(os.getenv("AGENT_MAX_TOKENS", "4096")),
         

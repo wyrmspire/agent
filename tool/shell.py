@@ -31,7 +31,7 @@ IS_WINDOWS = platform.system() == "Windows"
 class ShellTool(BaseTool):
     """Execute shell commands safely."""
     
-    def __init__(self, timeout: float = 30.0, cwd: str = "."):
+    def __init__(self, timeout: float = 120.0, cwd: str = "."):
         self.timeout = timeout
         self.cwd = cwd
     

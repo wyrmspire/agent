@@ -71,13 +71,13 @@ class QueueAddTool(BaseTool):
                 },
                 "max_tool_calls": {
                     "type": "integer",
-                    "description": "Maximum tool calls allowed (default: 20)",
-                    "default": 20
+                    "description": "Maximum tool calls allowed (default: 100)",
+                    "default": 100
                 },
                 "max_steps": {
                     "type": "integer",
-                    "description": "Maximum steps allowed (default: 10)",
-                    "default": 10
+                    "description": "Maximum steps allowed (default: 50)",
+                    "default": 50
                 }
             },
             "required": ["objective"]
@@ -108,8 +108,8 @@ class QueueAddTool(BaseTool):
             inputs = arguments.get("inputs", [])
             acceptance = arguments.get("acceptance")
             parent_id = arguments.get("parent_id")
-            max_tool_calls = arguments.get("max_tool_calls", 20)
-            max_steps = arguments.get("max_steps", 10)
+            max_tool_calls = arguments.get("max_tool_calls", 100)
+            max_steps = arguments.get("max_steps", 50)
             
             task_id = queue.add_task(
                 objective=objective,
@@ -210,8 +210,8 @@ Acceptance Criteria:
 {task.acceptance}
 
 Budget:
-- Max tool calls: {task.budget.get('max_tool_calls', 20)}
-- Max steps: {task.budget.get('max_steps', 10)}
+- Max tool calls: {task.budget.get('max_tool_calls', 100)}
+- Max steps: {task.budget.get('max_steps', 50)}
 
 Created: {task.created_at}
 

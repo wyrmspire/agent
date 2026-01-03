@@ -63,6 +63,9 @@ class WorkspaceContextBuilder:
             "last_session": self._get_last_session(),
             "projects": self._get_project_descriptions(),
             "skills": self._get_available_skills(),
+            # Phase 6: Structure awareness
+            "project_folders": self._scan_project_folders(),
+            "directory_tree": self._get_directory_tree(),
         }
         return context
     
@@ -220,6 +223,72 @@ class WorkspaceContextBuilder:
         except PermissionError:
             pass
         return skills
+    
+    # Directories to exclude from project folder scanning
+    EXCLUDED_DIRS = {"node_modules", "__pycache__", ".git", "chunks", "queue", "patches", "repos", "runs", "sessions"}
+    
+    def _scan_project_folders(self) -> List[Dict[str, Any]]:
+        """Scan workspace for project folders (non-standard directories).
+        
+        Returns:
+            List of project folder dicts with name, path, file_count
+        """
+        standard = {"data", "notes", "skills", "sessions", "queue", "patches", "repos", "runs", "chunks"}
+        projects = []
+        
+        try:
+            for entry in self.workspace_root.iterdir():
+                if not entry.is_dir():
+                    continue
+                if entry.name in standard or entry.name in self.EXCLUDED_DIRS:
+                    continue
+                if entry.name.startswith((".", "_")):
+                    continue
+                
+                # Count files, excluding node_modules subdirs
+                file_count = 0
+                try:
+                    for f in entry.rglob("*"):
+                        if f.is_file() and "node_modules" not in str(f):
+                            file_count += 1
+                except PermissionError:
+                    pass
+                
+                projects.append({
+                    "name": entry.name,
+                    "path": f"workspace/{entry.name}/",
+                    "file_count": file_count
+                })
+        except PermissionError:
+            pass
+        
+        return projects
+    
+    def _get_directory_tree(self, max_entries: int = 20) -> str:
+        """Get compact directory tree of workspace.
+        
+        Args:
+            max_entries: Maximum entries to return
+            
+        Returns:
+            Formatted tree string
+        """
+        lines = []
+        try:
+            for entry in sorted(self.workspace_root.iterdir()):
+                if entry.name.startswith("."):
+                    continue
+                if entry.is_dir():
+                    lines.append(f"📁 {entry.name}/")
+                else:
+                    lines.append(f"📄 {entry.name}")
+                if len(lines) >= max_entries:
+                    lines.append("... (more files)")
+                    break
+        except PermissionError:
+            pass
+        
+        return "\n".join(lines)
 
 
 def get_workspace_context(workspace_path: str = "workspace") -> Dict[str, Any]:

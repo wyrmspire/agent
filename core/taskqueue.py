@@ -34,6 +34,8 @@ class TaskStatus(str, Enum):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"  # Session ended mid-task
+    ABANDONED = "abandoned"       # Failed too many times
 
 
 @dataclass
@@ -62,6 +64,9 @@ class TaskPacket:
     created_at: str
     updated_at: str
     metadata: Dict[str, Any]
+    priority: int = 0           # Higher = runs first
+    failure_count: int = 0      # For retry tracking
+    max_retries: int = 2        # Max retry attempts
 
 
 @dataclass
@@ -213,26 +218,71 @@ class TaskQueue:
         return task_id
     
     def get_next(self) -> Optional[TaskPacket]:
-        """Get the next queued task.
+        """Get the next queued task, respecting priority.
         
         Returns:
-            Next queued task, or None if queue is empty
+            Next queued task (highest priority first), or None if queue is empty
         """
-        for task in self._tasks.values():
-            if task.status == TaskStatus.QUEUED:
-                # Mark as running
-                task.status = TaskStatus.RUNNING
+        # Get all queued tasks and sort by priority (descending)
+        queued = [t for t in self._tasks.values() if t.status == TaskStatus.QUEUED]
+        if not queued:
+            logger.info("No queued tasks available")
+            return None
+        
+        # Sort by priority (highest first), then by creation time (oldest first)
+        queued.sort(key=lambda t: (-t.priority, t.created_at))
+        task = queued[0]
+        
+        # Mark as running
+        task.status = TaskStatus.RUNNING
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        self._update_task(task)
+        
+        # Persist active task for agent loop
+        self.active_task_file.write_text(json.dumps(asdict(task), indent=2))
+        
+        logger.info(f"Starting task {task.task_id} (priority: {task.priority})")
+        return task
+    
+    def cleanup_stale_tasks(self) -> Dict[str, int]:
+        """Clean up stale tasks on session startup.
+        
+        Marks "running" tasks as "interrupted" and handles failed task retries.
+        
+        Returns:
+            Dict with counts of cleaned up tasks
+        """
+        counts = {"interrupted": 0, "abandoned": 0, "retried": 0}
+        
+        for task in list(self._tasks.values()):
+            # Mark stale "running" tasks as interrupted
+            if task.status == TaskStatus.RUNNING:
+                task.status = TaskStatus.INTERRUPTED
                 task.updated_at = datetime.now(timezone.utc).isoformat()
                 self._update_task(task)
-                
-                # Persist active task for agent loop
-                self.active_task_file.write_text(json.dumps(asdict(task), indent=2))
-                
-                logger.info(f"Starting task {task.task_id}")
-                return task
+                counts["interrupted"] += 1
+                logger.info(f"Marked stale task {task.task_id} as interrupted")
+            
+            # Handle failed tasks - retry or abandon
+            elif task.status == TaskStatus.FAILED:
+                if task.failure_count < task.max_retries:
+                    # Retry: reset to queued with incremented failure count
+                    task.failure_count += 1
+                    task.status = TaskStatus.QUEUED
+                    task.updated_at = datetime.now(timezone.utc).isoformat()
+                    self._update_task(task)
+                    counts["retried"] += 1
+                    logger.info(f"Retrying task {task.task_id} (attempt {task.failure_count + 1})")
+                else:
+                    # Abandon: too many failures
+                    task.status = TaskStatus.ABANDONED
+                    task.updated_at = datetime.now(timezone.utc).isoformat()
+                    self._update_task(task)
+                    counts["abandoned"] += 1
+                    logger.info(f"Abandoned task {task.task_id} after {task.max_retries} failures")
         
-        logger.info("No queued tasks available")
-        return None
+        return counts
+
     
     def mark_done(
         self,

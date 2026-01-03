@@ -82,7 +82,16 @@ class GeminiGateway(ModelGateway, EmbeddingGateway):
                 tool_args_str = re.sub(r'\bFalse\b', 'false', tool_args_str)
                 tool_args_str = re.sub(r'\bNone\b', 'null', tool_args_str)
                 
-                tool_args = json.loads(tool_args_str)
+                # Fix multiline strings: replace literal newlines with escaped newlines
+                # This handles cases where model outputs code with actual newlines in JSON
+                # We need to be careful to only escape newlines inside string values
+                try:
+                    tool_args = json.loads(tool_args_str)
+                except json.JSONDecodeError:
+                    # Try escaping newlines inside string values
+                    # Simple approach: replace all literal newlines with \n escape
+                    sanitized = tool_args_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    tool_args = json.loads(sanitized)
                 
                 tool_calls.append(ToolCall(
                     id=f"call_{tool_name}_{int(time.time() * 1000)}",

@@ -40,7 +40,7 @@ class TestMemoryTool(unittest.TestCase):
         self.assertIn("content", schema["properties"])
         self.assertIn("store", schema["properties"]["operation"]["enum"])
         self.assertIn("search", schema["properties"]["operation"]["enum"])
-        self.assertEqual(len(schema["required"]), 2)
+        self.assertEqual(len(schema["required"]), 1)  # only operation is required now
     
     def test_store_memory(self):
         """Test storing memories."""
@@ -179,7 +179,7 @@ class TestMemoryTool(unittest.TestCase):
             
             self.assertFalse(result.success)
             # Schema validation catches this
-            self.assertIn("required property", result.error)
+            self.assertIn("is required for operation", result.error)
         
         finally:
             loop.close()

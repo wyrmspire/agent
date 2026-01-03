@@ -203,21 +203,58 @@ class AgentLoop:
         max_steps_limit = task_budget.get("max_steps", self.max_steps)
         
         while state.execution.should_continue():
-            # BUDGET ENFORCEMENT CHECK
+            # BUDGET ENFORCEMENT CHECK - Checkpoint, not hard stop
             if active_task:
-                # Check Steps
+                # Check Steps - now a checkpoint with continue option
                 if state.execution.current_step >= max_steps_limit:
-                    reason = f"Step budget exhausted ({state.execution.current_step} >= {max_steps_limit})"
-                    logger.warning(reason)
-                    self._fail_active_task(active_task, "BUDGET_EXHAUSTED: " + reason, state)
-                    return f"Task stopped: {reason}"
+                    reason = f"Step budget checkpoint ({state.execution.current_step} >= {max_steps_limit})"
+                    logger.info(reason)
+                    
+                    print(f"\n{'='*60}")
+                    print(f"⏸️  TASK CHECKPOINT: Reached {max_steps_limit} steps on current task")
+                    print(f"   Task: {active_task.get('objective', 'unknown')[:50]}...")
+                    print(f"   Press ENTER to continue for another {max_steps_limit} steps")
+                    print(f"   Type 'quit' to stop this task and mark as failed")
+                    print(f"{'='*60}")
+                    
+                    try:
+                        user_input = input("\n>>> ").strip().lower()
+                        if user_input in ('quit', 'q', 'exit', 'stop', 'cancel'):
+                            self._fail_active_task(active_task, "USER_STOPPED: " + reason, state)
+                            return f"Task stopped by user at checkpoint."
+                        
+                        # User wants to continue - extend budget
+                        logger.info(f"User continued task past checkpoint")
+                        state.execution.current_step = 0  # Reset for another round
+                        
+                    except (KeyboardInterrupt, EOFError):
+                        self._fail_active_task(active_task, "USER_CANCELLED", state)
+                        return "Task cancelled by user."
                 
-                # Check Tool Calls
+                # Check Tool Calls - also a checkpoint
                 if tool_calls_used >= max_tool_calls_limit:
-                     reason = f"Tool call budget exhausted ({tool_calls_used} >= {max_tool_calls_limit})"
-                     logger.warning(reason)
-                     self._fail_active_task(active_task, "BUDGET_EXHAUSTED: " + reason, state)
-                     return f"Task stopped: {reason}"
+                    reason = f"Tool call budget checkpoint ({tool_calls_used} >= {max_tool_calls_limit})"
+                    logger.info(reason)
+                    
+                    print(f"\n{'='*60}")
+                    print(f"⏸️  TASK CHECKPOINT: Used {max_tool_calls_limit} tool calls")
+                    print(f"   Press ENTER to continue for another {max_tool_calls_limit} calls")
+                    print(f"   Type 'quit' to stop")
+                    print(f"{'='*60}")
+                    
+                    try:
+                        user_input = input("\n>>> ").strip().lower()
+                        if user_input in ('quit', 'q', 'exit', 'stop', 'cancel'):
+                            self._fail_active_task(active_task, "USER_STOPPED: " + reason, state)
+                            return f"Task stopped by user at checkpoint."
+                        
+                        # User wants to continue - extend budget
+                        logger.info(f"User continued task past tool call checkpoint")
+                        tool_calls_used = 0  # Reset for another round
+                        
+                    except (KeyboardInterrupt, EOFError):
+                        self._fail_active_task(active_task, "USER_CANCELLED", state)
+                        return "Task cancelled by user."
 
             step_num = state.execution.current_step + 1
             logger.info(f"Step {step_num}/{max_steps_limit}")
