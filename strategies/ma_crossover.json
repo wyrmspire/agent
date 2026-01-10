@@ -1,0 +1,30 @@
+{
+  "name": "MA Crossover",
+  "description": "Buy when fast MA crosses above slow MA, sell when it crosses below",
+  "entry_conditions": [
+    {
+      "type": "indicator_crosses_above",
+      "params": {
+        "indicator": "ma_fast",
+        "value": "ma_slow"
+      }
+    }
+  ],
+  "exit_conditions": [
+    {
+      "type": "indicator_crosses_below",
+      "params": {
+        "indicator": "ma_fast",
+        "value": "ma_slow"
+      }
+    }
+  ],
+  "parameters": {
+    "ma_fast_period": 10,
+    "ma_slow_period": 20
+  },
+  "metadata": {
+    "created_at": "2026-01-10T22:36:16.944687",
+    "version": "1.0"
+  }
+}

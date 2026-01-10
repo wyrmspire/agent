@@ -1,0 +1,11 @@
+{
+  "name": "Invalid Strategy",
+  "description": "",
+  "entry_conditions": [],
+  "exit_conditions": [],
+  "parameters": {},
+  "metadata": {
+    "created_at": "2026-01-10T22:34:38.222825",
+    "version": "1.0"
+  }
+}

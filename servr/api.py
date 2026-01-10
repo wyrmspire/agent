@@ -418,6 +418,83 @@ async def chat_completions(request: ChatCompletionRequest):
         usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     )
 
+# -------------------------------------------------------------------------
+# Strategy API Endpoints
+# -------------------------------------------------------------------------
+
+from tool.strategy import (
+    save_strategy_tool,
+    load_strategy_tool,
+    list_strategies_tool,
+    execute_strategy_tool,
+    delete_strategy_tool
+)
+
+
+class StrategyRequest(BaseModel):
+    """Request model for saving a strategy."""
+    name: str
+    description: str = ""
+    entry_conditions: List[Dict[str, Any]]
+    exit_conditions: List[Dict[str, Any]]
+    parameters: Dict[str, Any] = {}
+    strategy_id: Optional[str] = None
+
+
+class StrategyExecuteRequest(BaseModel):
+    """Request model for executing a strategy."""
+    data: List[Dict[str, Any]]
+    mode: str = "backtest"
+
+
+@app.post("/strategies")
+async def create_strategy(request: StrategyRequest):
+    """Save a new trading strategy."""
+    result = save_strategy_tool(request.dict())
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.get("/strategies")
+async def get_strategies():
+    """List all saved strategies."""
+    result = list_strategies_tool()
+    return result
+
+
+@app.get("/strategies/{strategy_id}")
+async def get_strategy(strategy_id: str):
+    """Get a specific strategy."""
+    result = load_strategy_tool({"strategy_id": strategy_id})
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    return result
+
+
+@app.post("/strategies/{strategy_id}/execute")
+async def run_strategy(strategy_id: str, request: StrategyExecuteRequest):
+    """Execute a strategy on data."""
+    params = {
+        "strategy_id": strategy_id,
+        "data": request.data,
+        "mode": request.mode
+    }
+    result = execute_strategy_tool(params)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.delete("/strategies/{strategy_id}")
+async def remove_strategy(strategy_id: str):
+    """Delete a strategy."""
+    result = delete_strategy_tool({"strategy_id": strategy_id})
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    return result
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
