@@ -1,0 +1,49 @@
+{
+  "name": "Multi-Condition Breakout",
+  "description": "Enter when price, RSI, and volume all confirm breakout",
+  "entry_conditions": [
+    {
+      "type": "and",
+      "params": {},
+      "children": [
+        {
+          "type": "price_above",
+          "params": {
+            "value": 100.0
+          }
+        },
+        {
+          "type": "indicator_above",
+          "params": {
+            "indicator": "rsi",
+            "value": 50.0
+          }
+        },
+        {
+          "type": "indicator_above",
+          "params": {
+            "indicator": "volume",
+            "value": 1000000
+          }
+        }
+      ]
+    }
+  ],
+  "exit_conditions": [
+    {
+      "type": "price_below",
+      "params": {
+        "value": 100.0
+      }
+    }
+  ],
+  "parameters": {
+    "breakout_level": 100.0,
+    "min_rsi": 50.0,
+    "min_volume": 1000000
+  },
+  "metadata": {
+    "created_at": "2026-01-10T22:36:16.945582",
+    "version": "1.0"
+  }
+}

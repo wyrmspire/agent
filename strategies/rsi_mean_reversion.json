@@ -1,0 +1,31 @@
+{
+  "name": "RSI Mean Reversion",
+  "description": "Buy oversold, sell overbought",
+  "entry_conditions": [
+    {
+      "type": "indicator_crosses_below",
+      "params": {
+        "indicator": "rsi",
+        "value": 30.0
+      }
+    }
+  ],
+  "exit_conditions": [
+    {
+      "type": "indicator_crosses_above",
+      "params": {
+        "indicator": "rsi",
+        "value": 70.0
+      }
+    }
+  ],
+  "parameters": {
+    "rsi_period": 14,
+    "oversold": 30,
+    "overbought": 70
+  },
+  "metadata": {
+    "created_at": "2026-01-10T22:36:16.945244",
+    "version": "1.0"
+  }
+}
